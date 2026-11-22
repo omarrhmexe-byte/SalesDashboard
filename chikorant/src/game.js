@@ -1,0 +1,808 @@
+// Core game: renderer, world, player controller, weapon, abilities, bots, round flow.
+import * as THREE from 'three';
+import { buildMap } from './map.js';
+import { solids, moveBody, raycast, rayCylinder, raySphere, lineOfSight } from './physics.js';
+import { Particles, Tracers, Decals, Confetti, Fireworks } from './fx.js';
+import { Bot, Nav, Projectiles } from './bots.js';
+import { ViewModel } from './weapon.js';
+import { Post } from './post.js';
+import { Input } from './input.js';
+import { sfx, startAmbience, stopAmbience, setVolume, getVolume } from './audio.js';
+import { buildRoundList, PLAYER_NAME, FINAL_ROUND } from './config.js';
+import * as UI from './ui.js';
+import { setAniso, textSprite } from './textures.js';
+import { outlineMaterial, addOutlines } from './builder.js';
+
+const PI = Math.PI;
+const RUN = 6.4, WALK = 3.2, JUMP_V = 6.9, GRAV = 22, EYE = 1.62, RADIUS = 0.38, HEIGHT = 1.8;
+const MAG = 25, FIRE_DT = 0.095, RELOAD = 1.9, DMG_BODY = 30, HS_MULT = 2.5;
+const DASH_CD = 3, UP_CD = 6, ULT_COST = 5, ULT_TIME = 7;
+const ROUND_TIME = 120, PLANT_PHASE_TIME = 120;
+
+const POST_SETS = [
+  ['aLane', 'mid', 'bLane', 'backHall'],
+  ['bLane', 'bMain', 'bStage', 'bBoard', 'mid2'],
+  ['aLane', 'aMain', 'aPlat', 'mid', 'bSite', 'bStage'],
+];
+const BONUS_POSTS = ['aCrate', 'aSite', 'mid', 'backHall2', 'bSite', 'bBoard', 'aMain', 'bMain'];
+
+const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion();
+
+export class Game {
+  constructor({ canvas, mobile, quality }) {
+    this.canvas = canvas; this.mobile = mobile; this.quality = quality;
+    this.settings = loadSettings(mobile);
+    if (this.settings.quality) this.quality = this.settings.quality;
+    setVolume(this.settings.volume);
+
+    // renderer
+    const r = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
+    r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.0;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer = r; setAniso(Math.min(8, r.capabilities.getMaxAnisotropy()));
+
+    // scene
+    const scene = new THREE.Scene(); this.scene = scene;
+    scene.fog = new THREE.Fog(0xf3c9a3, 80, 260);
+    this.camera = new THREE.PerspectiveCamera(mobile ? 78 : 72, 1, 0.05, 600);
+    this.camera.rotation.order = 'YXZ';
+    this.buildSky();
+    this.buildLights();
+    this.map = buildMap(scene, { quality: this.quality });
+    this.nav = new Nav(this.map.nodes, this.map.edges);
+    this.vm = new ViewModel();
+    this.post = new Post(r, scene, this.camera, this.vm);
+    this.ps = new Particles(scene); this.tracers = new Tracers(scene); this.decals = new Decals(scene);
+    this.confetti = new Confetti(scene); this.fireworks = new Fireworks(this.ps, () => sfx.firework());
+    this.proj = new Projectiles(scene, this.ps);
+    this.input = new Input(canvas, mobile);
+    this.input.onUnlock = () => this.onUnlock();
+    this.cake = this.buildCake(); this.cake.visible = false; scene.add(this.cake);
+    this.plantLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: textSprite('PLANT THE CAKE HERE', '#FFC21A', 58), depthTest: false, transparent: true }));
+    this.plantLabel.scale.set(6, 1.5, 1); this.plantLabel.position.set(this.map.dyn.plantCenter.x, 4.2, this.map.dyn.plantCenter.z); this.plantLabel.visible = false; this.plantLabel.renderOrder = 10; scene.add(this.plantLabel);
+
+    this.rounds = buildRoundList();
+    this.score = { me: 0, them: 0 };
+    this.state = 'menu'; this.paused = false; this.timeScale = 1;
+    this.player = this.makePlayer();
+    this.bots = [];
+    this.t = 0; this.last = performance.now();
+    this.hudCache = {};
+    this.applyQuality();
+    this.buildMinimap();
+    this.resize(); addEventListener('resize', () => this.resize());
+    // warm up shaders
+    this.camera.position.set(0, 1.6, 31); this.camera.rotation.set(0, 0, 0);
+    this.renderer.compile(scene, this.camera);
+    this.bindUI();
+    this.renderer.setAnimationLoop(() => this.frame());
+  }
+
+  // ── setup ────────────────────────────────────────────────────────────────
+  buildSky() {
+    const sunDir = new THREE.Vector3(-0.55, 0.32, 0.77).normalize(); this.sunDir = sunDir;
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uSun: { value: sunDir } }, side: THREE.BackSide, depthWrite: false, fog: false,
+      vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); gl_Position.z = gl_Position.w; }',
+      fragmentShader: `uniform vec3 uSun; varying vec3 vD;
+        void main(){ float h = vD.y;
+          vec3 top = vec3(0.16,0.38,0.62), mid = vec3(0.47,0.68,0.84), hor = vec3(1.0,0.80,0.62), low = vec3(0.95,0.62,0.48);
+          vec3 c = mix(hor, mid, smoothstep(0.0, 0.22, h)); c = mix(c, top, smoothstep(0.22, 0.75, h)); c = mix(c, low, smoothstep(0.0,-0.2,h));
+          float s = max(0.0, dot(normalize(vD), uSun));
+          c += vec3(1.0,0.62,0.32) * pow(s, 6.0) * 0.45 + vec3(1.0,0.85,0.6) * pow(s, 60.0) * 0.8;
+          c += vec3(1.6,1.4,1.1) * smoothstep(0.9993, 0.9996, s);
+          gl_FragColor = vec4(c, 1.0); }`,
+    });
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), mat); sky.frustumCulled = false; sky.renderOrder = -1;
+    this.scene.add(sky); this.sky = sky;
+  }
+  buildLights() {
+    const hemi = new THREE.HemisphereLight(0xbcdaf2, 0xe7b48a, 1.35); this.scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xffd3a2, 2.7);
+    sun.position.copy(this.sunDir).multiplyScalar(120); sun.target.position.set(0, 0, 0);
+    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+    const sc = sun.shadow.camera; sc.left = -62; sc.right = 62; sc.top = 52; sc.bottom = -52; sc.near = 20; sc.far = 260;
+    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05; sun.shadow.radius = 3;
+    this.scene.add(sun, sun.target); this.sun = sun;
+    const fill = new THREE.DirectionalLight(0xffc9a8, 0.5); fill.position.set(40, 30, -30); this.scene.add(fill);
+    this.muzzleLight = new THREE.PointLight(0xffc27a, 0, 9, 2); this.scene.add(this.muzzleLight);
+    this.cakeLight = new THREE.PointLight(0xffb24a, 0, 7, 2); this.scene.add(this.cakeLight);
+  }
+  buildCake() {
+    const g = new THREE.Group();
+    const m = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6, ...o });
+    const add = (geo, mat, x, y, z) => { const o = new THREE.Mesh(geo, mat); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+    add(new THREE.CylinderGeometry(0.42, 0.44, 0.06, 28), m(0xd9c9a8, { metalness: 0.5, roughness: 0.3 }), 0, 0.03, 0);
+    add(new THREE.CylinderGeometry(0.36, 0.36, 0.26, 28), m(0xfff1dc), 0, 0.19, 0);
+    add(new THREE.TorusGeometry(0.36, 0.035, 8, 28), m(0xff4655), 0, 0.32, 0).rotation.x = PI / 2;
+    add(new THREE.CylinderGeometry(0.26, 0.26, 0.2, 24), m(0xff8fa6), 0, 0.42, 0);
+    add(new THREE.TorusGeometry(0.26, 0.03, 8, 24), m(0xfff1dc), 0, 0.52, 0).rotation.x = PI / 2;
+    for (let i = 0; i < 10; i++) { const a = (i / 10) * PI * 2; add(new THREE.SphereGeometry(0.04, 8, 6), m(0xffc21a), Math.cos(a) * 0.36, 0.08, Math.sin(a) * 0.36); }
+    const flames = [];
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * PI * 2 + 0.3; const x = Math.cos(a) * 0.15, z = Math.sin(a) * 0.15;
+      add(new THREE.CylinderGeometry(0.018, 0.018, 0.14, 8), m(i % 2 ? 0x2f8f88 : 0xffc21a), x, 0.59, z);
+      const f = add(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 3.6, 1.2) }), x, 0.69, z); f.scale.y = 1.6; f.castShadow = false; flames.push(f);
+    }
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.75, 40), new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 1.2, 0.6), transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -PI / 2; ring.position.y = 0.02; g.add(ring);
+    g.userData = { flames, ring };
+    addOutlines(g, outlineMaterial(0.012));
+    return g;
+  }
+  makePlayer() {
+    return {
+      pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, recoilP: 0, recoilY: 0,
+      hp: 100, shield: 50, alive: true, onGround: true, lastHurt: -99, ammo: MAG, reloadT: 0, fireCd: 0, shotIdx: 0, lastShot: -9,
+      dashT: 0, dashDir: new THREE.Vector3(), cdQ: 0, cdE: 0, ult: 0, ultT: 0, updraftT: 0, camY: EYE, stepT: 0,
+      tookDamage: false, kills: 0, catRescued: false, carrying: false, plantT: 0,
+    };
+  }
+  applyQuality() {
+    const hi = this.quality === 'high';
+    this.renderer.shadowMap.enabled = hi; this.sun.castShadow = hi;
+    this.post.enabled = hi;
+    this.pixelRatio = hi ? Math.min(devicePixelRatio, 1.5) : Math.min(devicePixelRatio, this.mobile ? 1 : 1.25) * (this.mobile ? 0.85 : 1);
+    this.scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; ms.forEach((m) => (m.needsUpdate = true)); } });
+    this.muzzleLight.visible = hi; this.cakeLight.visible = hi;
+    this.resize();
+  }
+  resize() {
+    const w = innerWidth, h = innerHeight;
+    this.renderer.setPixelRatio(this.pixelRatio || 1); this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    this.vm.resize(w / h);
+    this.post.setSize(w, h, this.pixelRatio || 1);
+    this.ps.mat.uniforms.uScale.value = (h * (this.pixelRatio || 1)) / (2 * Math.tan((this.camera.fov * PI) / 360));
+    const portrait = this.mobile && h > w; UI.show('rotate', portrait);
+  }
+
+  bindUI() {
+    UI.$('resume').onclick = () => { sfx.click(); this.resume(); };
+    UI.$('restart').onclick = () => { sfx.click(); UI.show('pause', false); this.paused = false; this.input.lock(); this.startRound(this.roundIdx); };
+    const vol = UI.$('vol'); vol.value = this.settings.volume;
+    vol.oninput = () => { setVolume(+vol.value); UI.setNoteVolume(+vol.value); this.settings.volume = +vol.value; saveSettings(this.settings); };
+    const sens = UI.$('sens'); sens.value = this.settings.sens;
+    sens.oninput = () => { this.settings.sens = +sens.value; saveSettings(this.settings); };
+    const q = UI.$('quality'); q.value = this.quality;
+    q.onchange = () => { this.quality = q.value; this.settings.quality = q.value; saveSettings(this.settings); this.applyQuality(); };
+    UI.$('pauseBtn').addEventListener('click', () => this.pause());
+    UI.$('pauseBtn').addEventListener('touchstart', (e) => { e.preventDefault(); this.pause(); }, { passive: false });
+    this.canvas.addEventListener('click', () => { if (!this.mobile && this.isPlaying() && !this.input.locked) this.input.lock(); });
+  }
+  isPlaying() { return ['buy', 'live', 'won', 'lost', 'boom'].includes(this.state); }
+  onUnlock() { if (this.isPlaying() && this.state !== 'lost') this.pause(); }
+  pause() {
+    if (!this.isPlaying() || this.paused) return;
+    this.paused = true; UI.show('pause'); this.input.unlock(); this.input.enabled = false;
+  }
+  resume() {
+    UI.show('pause', false); this.paused = false; this.input.enabled = true; this.last = performance.now();
+    this.input.lock();
+    // browsers refuse a re-lock for ~1s after Esc; if it didn't take, keep the pause menu up
+    if (!this.mobile) setTimeout(() => { if (!this.input.locked && this.isPlaying() && !this.paused && !this.noAutoPause) this.pause(); }, 600);
+  }
+
+  // ── round flow ───────────────────────────────────────────────────────────
+  begin() { // called after LOCK IN + intro
+    UI.show('hud'); if (this.mobile) { UI.show('touch'); document.body.classList.add('mobile'); }
+    this.input.enabled = true;
+    startAmbience();
+    this.startRound(0);
+  }
+  startRound(i) {
+    this.roundIdx = i; const R = this.rounds[i]; this.R = R;
+    this.clearWorld();
+    const p = this.player; Object.assign(p, this.makePlayer(), { ult: Math.min(ULT_COST, this.carryUlt || 0) });
+    p.pos.copy(this.map.spawnPoint); p.yaw = 0; p.pitch = 0;
+    p.carrying = !!R.final;
+    // barrier up
+    const d = this.map.dyn; d.barrier.position.y = 2.5; d.barrier.visible = true; d.barrierSolid.on = true; d.barrier.material.uniforms.uA.value = 1;
+    // bots
+    const names = R.final ? R.defenders : R.bots;
+    const posts = R.final ? ['aSite', 'aPlat'] : (POST_SETS[i] || shuffle(BONUS_POSTS).slice(0, names.length));
+    this.bots = names.map((n, k) => {
+      const pp = this.map.posts[posts[k % posts.length]];
+      const b = new Bot(this.scene, n, pp[0] + (k >= posts.length ? 1.5 : 0), pp[1], { yaw: -PI / 2 + (Math.random() - 0.5) * 0.6, difficulty: Math.min(3, i), hp: 100 });
+      return b;
+    });
+    UI.teamIcons(this.bots.map((b) => b.name));
+    this.rushQueue = []; this.cakePlanted = false; this.cakeT = 0; this.boomT = 0;
+    this.cake.visible = false; d.plantRing.visible = !!R.final; d.plantBeacon.visible = !!R.final; this.plantLabel.visible = !!R.final;
+    this.roundTime = R.final ? PLANT_PHASE_TIME : ROUND_TIME;
+    this.liveT = 0; this.buyT = 0; this.countdownN = 4; this.state = 'buy'; this.timeScale = 1; this.slowT = 0;
+    this.vm.equip = 1;
+    UI.$('rdlabel').textContent = R.final ? 'FINAL ROUND' : `ROUND ${i + 1}`;
+    UI.banner(R.final ? 'FINAL ROUND' : `ROUND ${i + 1}`, R.title.toUpperCase(), R.final ? 'CARRY THE CAKE TO A SITE' : '', 'round', 2100);
+    UI.$('objective').textContent = R.final ? 'BRING THE CAKE TO A SITE (THE PANTRY) · HOLD F TO PLANT' : 'ELIMINATE ALL DEADLINES';
+    UI.show('cakechip', !!R.final); UI.show('tF', false);
+    sfx.roundStart();
+    this.hudCache = {};
+  }
+  clearWorld() {
+    this.bots.forEach((b) => b.dispose()); this.bots = [];
+    this.proj.clear(); this.ps.clear(); this.decals.clear(); this.confetti.clear(); this.fireworks.rockets = [];
+    UI.$('feed').innerHTML = ''; UI.hideBanner(); UI.tip('');
+    UI.$('goldfx').classList.remove('on'); UI.show('plantbar', false);
+    this.post.grade.uniforms.uGold.value = 0; this.post.grade.uniforms.uHurt.value = 0;
+  }
+  dropBarrier() {
+    const d = this.map.dyn; d.barrierSolid.on = false; this.barrierAnim = 0.0001; sfx.barrier();
+    this.bots.forEach((b) => (b.frozen = false)); this.state = 'live';
+    UI.banner('', 'GO', '', 'round', 700);
+  }
+  winRound() {
+    if (this.state !== 'live') return;
+    this.state = 'won'; this.wonT = 0; this.score.me++;
+    const p = this.player; const labels = [];
+    if (!p.tookDamage) labels.push('FLAWLESS');
+    if (p.kills >= 5) labels.push('ACE');
+    if (p.hp < 30) labels.push('CLUTCH');
+    this.winLabel = labels.join(' · ');
+    this.slowT = 1.1; this.timeScale = 0.3;
+    setTimeout(() => { sfx.win(); UI.banner('ENEMY TEAM ELIMINATED', 'ROUND WIN', this.winLabel, 'win', 2600); }, 450);
+    this.carryUlt = p.ult;
+  }
+  loseRound(reason) {
+    if (this.state !== 'live' && this.state !== 'buy') return;
+    this.state = 'lost'; this.lostT = 0; this.score.them++;
+    sfx.lose(); UI.banner(reason === 'time' ? "TIME'S UP" : 'ELIMINATED', 'ROUND LOSS', '', 'lose', 2400);
+    this.input.fire = false;
+  }
+  afterWin() {
+    this.input.unlock(); this.input.enabled = false;
+    const R = this.R; const nextIdx = this.roundIdx + 1;
+    const next = this.rounds[nextIdx];
+    UI.showCard({
+      winLabel: `ROUND ${this.roundIdx + 1} WIN${this.winLabel ? ' · ' + this.winLabel : ''}`,
+      note: R.note, pending: R.pending, roundNum: this.roundIdx + 1,
+      nextLabel: next && next.final ? 'FINAL ROUND ▸' : 'NEXT ROUND ▸',
+      onNext: () => { this.input.enabled = true; this.input.lock(); this.startRound(nextIdx); },
+    });
+    this.state = 'card';
+  }
+  afterLoss() {
+    this.input.unlock(); this.input.enabled = false; this.state = 'deadscreen';
+    UI.showDead(this.lossReason === 'time' ? "TIME'S UP" : 'ELIMINATED', () => { this.input.enabled = true; this.input.lock(); this.startRound(this.roundIdx); });
+  }
+
+  // ── frame ────────────────────────────────────────────────────────────────
+  frame() {
+    const now = performance.now(); let dt = Math.min(0.05, (now - this.last) / 1000); this.last = now;
+    if (this.paused) dt = 0;
+    this.t += dt;
+    if (this.state !== 'menu' && this.state !== 'card' && this.state !== 'deadscreen' && this.state !== 'end' && !this.paused) { for (let k = 0; k < (this.simSteps || 1); k++) this.update(dt); }
+    else if (this.state === 'menu') this.menuCam(dt);
+    else if (this.state === 'end') this.endUpdate(dt);
+    this.animateWorld(dt * (this.paused ? 0 : 1));
+    this.render(dt);
+    this.input.frameEnd();
+  }
+  menuCam(dt) {
+    const a = this.t * 0.06;
+    this.camera.position.set(Math.sin(a) * 7, 9.5, 21 + Math.cos(a) * 3);
+    this.camera.lookAt(0, 2, -14);
+  }
+  render(dt) {
+    const hi = this.quality === 'high';
+    if (hi) this.post.render(dt);
+    else {
+      const r = this.renderer; r.autoClear = true; r.render(this.scene, this.camera);
+      if (this.state !== 'menu') { r.autoClear = false; r.clearDepth(); r.render(this.vm.scene, this.vm.camera); r.autoClear = true; }
+    }
+    this.post.weapon.enabled = this.state !== 'menu';
+  }
+
+  update(dt) {
+    const p = this.player; const inp = this.input;
+    // desktop: if the mouse isn't captured mid-round, show the pause menu (it has the RESUME button)
+    if (!this.mobile && !inp.locked && !this.noAutoPause && (this.state === 'buy' || this.state === 'live')) { this.unlockedT = (this.unlockedT || 0) + dt; if (this.unlockedT > 0.8) { this.unlockedT = 0; this.pause(); return; } } else this.unlockedT = 0;
+    // time scale (ult / last-kill slow-mo)
+    if (this.slowT > 0) { this.slowT -= dt; if (this.slowT <= 0 && p.ultT <= 0) this.timeScale = 1; }
+    if (p.ultT > 0) { p.ultT -= dt; this.timeScale = 0.4; if (p.ultT <= 0) { this.timeScale = 1; sfx.ultEnd(); } }
+    const wdt = dt * this.timeScale;
+
+    // state timers
+    if (this.state === 'buy') {
+      this.buyT += dt;
+      const n = 3 - Math.floor(this.buyT - 2.1);
+      if (this.buyT > 2.1 && n !== this.countdownN && n >= 1) { this.countdownN = n; UI.countdown(n); sfx.beep(false); }
+      if (this.buyT >= 5.1) { sfx.beep(true); this.dropBarrier(); }
+    } else if (this.state === 'live') {
+      this.liveT += dt;
+      if (!this.cakePlanted) { this.roundTime -= dt; if (this.roundTime <= 0) { this.lossReason = 'time'; this.loseRound('time'); } }
+      // stalled rounds: send the remaining bots hunting
+      const alive = this.bots.filter((b) => b.alive && !b.rush);
+      if (!this.R.final && (this.liveT > 45 || (alive.length <= 2 && this.liveT > 25))) alive.forEach((b) => (b.hunt = true));
+      if (this.R.final) this.updateFinal(dt);
+    } else if (this.state === 'won') {
+      this.wonT += dt; if (this.wonT > 3.4) this.afterWin();
+    } else if (this.state === 'lost') {
+      this.lostT += dt; if (this.lostT > 2.2) this.afterLoss();
+    } else if (this.state === 'boom') {
+      this.boomT += dt; this.updateBoom(dt);
+    }
+
+    if (p.alive && this.state !== 'boom') this.updatePlayer(dt, inp);
+    else if (!p.alive) this.deathCam(dt);
+
+    // bots & projectiles
+    for (const b of this.bots) b.update(wdt, this);
+    this.bots = this.bots.filter((b) => { if (!b.alive && b.dying > 2) { b.dispose(); return false; } return true; });
+    this.proj.update(wdt, this);
+    this.ps.update(wdt); this.tracers.update(dt); this.confetti.update(wdt); this.fireworks.update(wdt);
+
+    if (this.state === 'live' && !this.R.final && this.bots.every((b) => !b.alive)) this.winRound();
+
+    // shield regen
+    if (p.alive && this.t - p.lastHurt > 4 && p.shield < 50) p.shield = Math.min(50, p.shield + 25 * dt);
+
+    this.updateCamera(dt);
+    this.updateHUD(dt);
+  }
+
+  updatePlayer(dt, inp) {
+    const p = this.player; const live = this.state === 'live' || this.state === 'buy' || this.state === 'won';
+    // look
+    const sens = 0.0022 * this.settings.sens * (this.mobile ? 0.55 : 1);
+    p.yaw -= inp.dx * sens; p.pitch -= inp.dy * sens;
+    p.pitch = Math.max(-1.45, Math.min(1.45, p.pitch));
+    if (this.mobile) this.aimAssist(dt);
+
+    // movement input
+    let fx = 0, fz = 0;
+    if (inp.keys.has('KeyW')) fz += 1; if (inp.keys.has('KeyS')) fz -= 1;
+    if (inp.keys.has('KeyD')) fx += 1; if (inp.keys.has('KeyA')) fx -= 1;
+    fx += inp.move.x; fz += inp.move.y;
+    const planting = this.R.final && p.carrying && this.inPlantZone() && (inp.keys.has('KeyF')) && p.onGround;
+    if (planting) { fx = 0; fz = 0; }
+    const len = Math.hypot(fx, fz); if (len > 1) { fx /= len; fz /= len; }
+    const sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
+    const wx = fx * cos - fz * sin, wz = -fx * sin - fz * cos; // world dir (forward is -z at yaw 0)
+    const walking = inp.keys.has('ShiftLeft') || inp.keys.has('ShiftRight');
+    const speed = (walking ? WALK : RUN) * (this.mobile ? Math.max(0.4, Math.min(1, len)) : 1) * (p.ultT > 0 ? 1.1 : 1);
+    const accel = p.onGround ? 65 : 16;
+    if (p.dashT > 0) {
+      p.dashT -= dt; p.vel.x = p.dashDir.x * 34; p.vel.z = p.dashDir.z * 34; p.vel.y = Math.max(p.vel.y, 0);
+      const cols = [[5, 1.2, 1.5], [5, 3.6, 0.5], [0.8, 3.6, 3.2], [4.6, 1, 4], [4.6, 4.4, 4]];
+      for (let i = 0; i < 6; i++) { const c = cols[(Math.random() * cols.length) | 0]; this.ps.emit(p.pos.x + (Math.random() - 0.5) * 0.9, p.pos.y + 0.3 + Math.random() * 1.3, p.pos.z + (Math.random() - 0.5) * 0.9, (Math.random() - 0.5) * 2, Math.random() * 1.5, (Math.random() - 0.5) * 2, c[0], c[1], c[2], 0.11, 0.7, -1, 1.5); }
+      // streaks that fly past the camera so the trail reads in first person
+      const sx = -p.dashDir.z, sz = p.dashDir.x;
+      for (let i = 0; i < 8; i++) {
+        const c = cols[(Math.random() * cols.length) | 0]; const side = (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.9); const ahead = 1.5 + Math.random() * 2.5;
+        this.ps.emit(p.pos.x + p.dashDir.x * ahead + sx * side, p.pos.y + 0.6 + Math.random() * 1.6, p.pos.z + p.dashDir.z * ahead + sz * side, -p.dashDir.x * 6, Math.random(), -p.dashDir.z * 6, c[0], c[1], c[2], 0.05, 0.5, 0, 0.5);
+      }
+      if (p.dashT <= 0) { p.vel.x *= 0.25; p.vel.z *= 0.25; }
+    } else {
+      const tx = wx * speed, tz = wz * speed;
+      const k = Math.min(1, accel * dt / speed);
+      if (p.onGround || len > 0.01) { p.vel.x += (tx - p.vel.x) * (p.onGround ? Math.min(1, 12 * dt) : k * 0.25); p.vel.z += (tz - p.vel.z) * (p.onGround ? Math.min(1, 12 * dt) : k * 0.25); }
+    }
+    // jump
+    if (inp.consume('Space') && p.onGround && !planting) { p.vel.y = JUMP_V; p.onGround = false; sfx.jump(); }
+    p.vel.y -= GRAV * dt * (p.updraftT > 0 ? 0.75 : 1);
+    if (p.updraftT > 0) { p.updraftT -= dt; this.windSwirl(dt); }
+    const was = p.onGround;
+    const res = moveBody(p.pos, p.vel, dt, RADIUS, HEIGHT, p.onGround);
+    p.onGround = res.onGround;
+    if (!was && p.onGround && res.landedSpeed > 6) { sfx.land(res.landedSpeed / 6); this.vm.kick = 0.5; }
+    // footsteps
+    const hs = Math.hypot(p.vel.x, p.vel.z);
+    if (p.onGround && hs > 2) { p.stepT -= dt * hs / 6.4; if (p.stepT <= 0) { p.stepT = 0.36; sfx.step(walking); } }
+    // safety: never leave the map
+    if (p.pos.y < -2 || Math.abs(p.pos.x) > 45 || Math.abs(p.pos.z) > 35) { p.pos.set(THREE.MathUtils.clamp(p.pos.x, -44, 44), Math.max(0, p.pos.y), THREE.MathUtils.clamp(p.pos.z, -34, 34)); p.vel.set(0, 0, 0); }
+
+    // abilities
+    if (inp.consume('KeyQ') && live) this.useDash(wx, wz, len);
+    if (inp.consume('KeyE') && live) this.useUpdraft();
+    if (inp.consume('KeyX') && live) this.useUlt();
+    p.cdQ = Math.max(0, p.cdQ - dt); p.cdE = Math.max(0, p.cdE - dt);
+
+    // cat rescue
+    const cat = this.map.dyn.catHit;
+    if (!p.catRescued && p.pos.y > 3.0 && Math.hypot(p.pos.x - cat.x, p.pos.z - cat.z) < 1.6) this.rescueCat();
+
+    // weapon
+    p.fireCd -= dt;
+    if (p.reloadT > 0) { p.reloadT -= dt; if (p.reloadT <= 0) { p.ammo = MAG; } }
+    if (inp.consume('KeyR') && p.ammo < MAG && p.reloadT <= 0 && !planting) this.reload();
+    const canShoot = this.state !== 'buy' && !planting && p.reloadT <= 0;
+    if (inp.firing && canShoot && p.fireCd <= 0) {
+      if (p.ammo > 0) this.shoot(); else { if (p.fireCd <= 0) { sfx.dry(); p.fireCd = 0.25; } this.reload(); }
+    }
+    if (this.t - p.lastShot > 0.14) { p.shotIdx = Math.max(0, p.shotIdx - dt * 30); const k = Math.min(1, dt * 7); p.recoilP -= p.recoilP * k; p.recoilY -= p.recoilY * k; }
+
+    // planting
+    if (this.R.final && p.carrying) {
+      const inZone = this.inPlantZone();
+      UI.show('tF', inZone && this.mobile);
+      if (inZone && this.state === 'live') {
+        UI.tip(this.mobile ? 'HOLD PLANT TO PLANT THE CAKE' : 'HOLD  F  TO PLANT THE CAKE');
+        if (planting) {
+          if (p.plantT === 0) sfx.plantTick();
+          p.plantT += dt; UI.show('plantbar'); UI.$('plantFill').style.width = `${Math.min(100, (p.plantT / FINAL_ROUND.plantSeconds) * 100)}%`;
+          if (Math.floor(p.plantT * 4) !== Math.floor((p.plantT - dt) * 4)) sfx.plantTick();
+          if (p.plantT >= FINAL_ROUND.plantSeconds) this.plantCake();
+        } else { p.plantT = 0; UI.show('plantbar', false); }
+      } else { UI.tip(''); p.plantT = 0; UI.show('plantbar', false); }
+    }
+    this.planting = planting;
+
+    // viewmodel
+    this.vm.update(dt, { moving: hs > 0.5, speed: hs, onGround: p.onGround, lookDX: inp.dx, lookDY: inp.dy, lowered: planting || this.state === 'won', tilt: p.dashT > 0 ? -fx * 0.15 : -fx * 0.03 });
+  }
+
+  aimAssist(dt) {
+    const p = this.player; const cam = this.camera; let best = null, bestA = 0.14;
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+    for (const b of this.bots) {
+      if (!b.alive || !b.canSee) continue;
+      const tgt = _v.set(b.pos.x, b.pos.y + 1.25, b.pos.z).sub(cam.position); const d = tgt.length(); tgt.divideScalar(d);
+      const a = Math.acos(Math.min(1, fwd.dot(tgt))); if (a < bestA) { bestA = a; best = b; }
+    }
+    if (!best) return;
+    const tgt = _v.set(best.pos.x, best.pos.y + 1.3, best.pos.z).sub(cam.position);
+    const yaw = Math.atan2(-tgt.x, -tgt.z), pitch = Math.atan2(tgt.y, Math.hypot(tgt.x, tgt.z));
+    let dy = yaw - p.yaw; while (dy > PI) dy -= 2 * PI; while (dy < -PI) dy += 2 * PI;
+    const k = Math.min(1, dt * (this.input.firing ? 5 : 2));
+    p.yaw += dy * k; p.pitch += (pitch - p.pitch - p.recoilP) * k * 0.6;
+  }
+
+  updateCamera(dt) {
+    const p = this.player; const cam = this.camera;
+    p.camY += (EYE - p.camY) * Math.min(1, dt * 14);
+    const stepDiff = p.pos.y + EYE - (this.lastCamY ?? p.pos.y + EYE);
+    if (p.onGround && stepDiff > 0 && stepDiff < 0.5) p.camY -= stepDiff * 0.8; // smooth step-ups
+    this.lastCamY = p.pos.y + EYE;
+    if (p.alive) {
+      cam.position.set(p.pos.x, p.pos.y + p.camY, p.pos.z);
+      cam.rotation.set(p.pitch + p.recoilP, p.yaw + p.recoilY, 0);
+    }
+    const targetFov = (this.mobile ? 78 : 72) + (p.dashT > 0 ? 10 : 0) + (p.ultT > 0 ? -4 : 0);
+    if (Math.abs(cam.fov - targetFov) > 0.05) { cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 10); cam.updateProjectionMatrix(); }
+    // gold grade
+    const g = this.post.grade.uniforms;
+    const gold = p.ultT > 0 ? 1 : (this.state === 'boom' ? 0.6 : 0);
+    g.uGold.value += (gold - g.uGold.value) * Math.min(1, dt * 4);
+    g.uHurt.value = Math.max(0, g.uHurt.value - dt * 2.5);
+    if (this.quality !== 'high') UI.$('goldfx').classList.toggle('on', p.ultT > 0);
+    // muzzle light fade
+    this.muzzleLight.intensity = Math.max(0, this.muzzleLight.intensity - dt * 200);
+  }
+
+  deathCam(dt) {
+    const cam = this.camera; this.deathT = (this.deathT || 0) + dt;
+    const t = Math.min(1, this.deathT / 0.8);
+    cam.position.y = Math.max(0.35, this.player.pos.y + EYE - t * 1.3);
+    cam.rotation.z = t * 0.5; cam.rotation.x = this.player.pitch - t * 0.3;
+  }
+
+  // ── combat ───────────────────────────────────────────────────────────────
+  shoot() {
+    const p = this.player; const cam = this.camera;
+    p.ammo--; p.fireCd = FIRE_DT; p.lastShot = this.t;
+    const i = p.shotIdx;
+    // recoil: first shots accurate, then climb, then horizontal sway
+    const kp = i < 2 ? 0.002 : Math.min(0.012, 0.004 + i * 0.0012);
+    p.recoilP = Math.min(0.11, p.recoilP + kp);
+    if (i > 6) p.recoilY += Math.sin(i * 0.9) * 0.006;
+    p.shotIdx = Math.min(30, i + 1);
+    cam.rotation.set(p.pitch + p.recoilP, p.yaw + p.recoilY, 0); cam.updateMatrixWorld();
+    // spread: tiny when still, more when running/in air (forgiving)
+    const hs = Math.hypot(p.vel.x, p.vel.z);
+    let spread = 0.0015 + (i > 3 ? 0.004 : 0);
+    if (hs > 3.6) spread += 0.012; if (!p.onGround) spread += 0.03;
+    if (this.mobile) spread *= 0.5;
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+    dir.x += (Math.random() - 0.5) * spread * 2; dir.y += (Math.random() - 0.5) * spread * 2; dir.z += (Math.random() - 0.5) * spread * 2; dir.normalize();
+    const o = cam.position;
+    const wall = raycast(o.x, o.y, o.z, dir.x, dir.y, dir.z, 250);
+    let maxT = wall ? wall.t : 250;
+    // bots
+    const hb = this.mobile ? 1.35 : 1.12;
+    let hitBot = null, hitT = maxT, head = false;
+    for (const b of this.bots) {
+      if (!b.alive) continue;
+      const h = b.head();
+      const th = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, h.x, h.y, h.z, 0.24 * hb);
+      const tb = rayCylinder(o.x, o.y, o.z, dir.x, dir.y, dir.z, b.pos.x, b.pos.z, b.pos.y, b.pos.y + 1.45, 0.4 * hb);
+      if (th > 0 && th < hitT && (tb < 0 || th <= tb + 0.3)) { hitT = th; hitBot = b; head = true; }
+      else if (tb > 0 && tb < hitT) { hitT = tb; hitBot = b; head = false; }
+    }
+    // the cat (never takes damage)
+    const c = this.map.dyn.catHit;
+    const tc = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, c.x, c.y, c.z, 0.5);
+    const end = o.clone().addScaledVector(dir, Math.min(hitT, maxT, tc > 0 ? tc : 1e9));
+    if (tc > 0 && tc < hitT && tc < maxT) {
+      UI.toast('NEVER. THE CAT IS SAFE.', 'NICE TRY', 1800); sfx.catSafe(); sfx.meow();
+      this.ps.burst(end, 16, { speed: 3, color: [[5, 4, 1], [5, 1.5, 3]], size: 0.08, life: 0.6, grav: -1 });
+    } else if (hitBot) {
+      const mult = (head ? HS_MULT : 1) * (p.ultT > 0 ? 2 : 1);
+      const dmg = DMG_BODY * mult;
+      const killed = hitBot.damage(dmg, 1, head);
+      this.ps.burst(end, head ? 18 : 10, { speed: head ? 6 : 4, color: head ? [5, 4, 1.4] : [5, 1.2, 1.4], size: 0.07, life: 0.3, grav: 8 });
+      if (killed) this.onKill(hitBot, head);
+      else { if (head) { sfx.headshot(); UI.hitmarker('hs'); } else { sfx.hit(); UI.hitmarker(''); } }
+    } else if (wall) {
+      this.decals.add(end, wall.normal);
+      const n = _v2.set(wall.normal[0], wall.normal[1], wall.normal[2]);
+      this.ps.burst(end, 8, { speed: 5, color: [5, 3.4, 1.2], size: 0.045, life: 0.25, grav: 14, dir: n, spread: 0.8 });
+      this.ps.burst(end, 4, { speed: 1.2, color: [0.5, 0.45, 0.4], size: 0.18, life: 0.6, grav: -0.5, dir: n, spread: 0.6, drag: 3 });
+    }
+    // tracer + flash + light
+    const m = this.vm.muzzleCam(new THREE.Vector3());
+    m.multiplyScalar(1.6).applyQuaternion(cam.quaternion).add(cam.position);
+    if (Math.random() < 0.7) this.tracers.fire(m, end);
+    this.vm.fire(); sfx.shot(p.ultT > 0);
+    if (this.quality === 'high') { this.muzzleLight.position.copy(cam.position).addScaledVector(dir, 1.2); this.muzzleLight.intensity = 6; }
+    UI.$('cross').classList.add('spread'); clearTimeout(this.crossT); this.crossT = setTimeout(() => UI.$('cross').classList.remove('spread'), 120);
+    if (p.ammo === 0) setTimeout(() => this.reload(), 150);
+    // gunfire alerts nearby bots
+    for (const b of this.bots) if (b.alive && !b.aware && b.pos.distanceTo(p.pos) < 22) { b.aware = true; b.react = 0.8; b.lastSeenPos.copy(p.pos); b.lostT = 2; }
+  }
+  reload() {
+    const p = this.player; if (p.reloadT > 0 || p.ammo === MAG) return;
+    p.reloadT = RELOAD; this.vm.startReload(RELOAD); sfx.reload();
+  }
+  onKill(bot, head) {
+    const p = this.player; p.kills++;
+    UI.feed(PLAYER_NAME, bot.name, { hs: head });
+    UI.hitmarker('kill'); sfx.kill(p.kills); if (head) sfx.headshot();
+    const idx = this.botIndex(bot); if (idx >= 0) UI.markBotDead(idx);
+    const before = p.ult; p.ult = Math.min(ULT_COST, p.ult + 1);
+    if (before < ULT_COST && p.ult === ULT_COST) { sfx.ultReady(); UI.toast('MAIN CHARACTER READY', 'PRESS X', 1600); }
+    this.ps.burst(bot.head(), 24, { speed: 5, color: [[5, 1, 1.3], [5, 4, 1.2]], size: 0.08, life: 0.5, grav: 4 });
+  }
+  botIndex(bot) { return bot.teamIdx ?? this.bots.indexOf(bot); }
+  botFire(bot, target, dist) {
+    const from = new THREE.Vector3(); bot.P.muzzle.getWorldPosition(from);
+    const dir = target.clone().sub(from);
+    // aim at where the player is, not where they will be (dodgeable); add spread
+    const spread = 0.045 + dist * 0.0012;
+    dir.normalize(); dir.x += (Math.random() - 0.5) * spread * 2; dir.y += (Math.random() - 0.5) * spread * 1.2; dir.z += (Math.random() - 0.5) * spread * 2; dir.normalize();
+    const speed = 19 + Math.min(3, this.roundIdx) * 1.5;
+    const dmg = 6 + Math.min(3, this.roundIdx);
+    this.proj.spawn(from, dir, speed, dmg, bot);
+    this.ps.burst(from, 6, { speed: 2, color: [5, 0.8, 1], size: 0.08, life: 0.2, grav: 0 });
+    sfx.botShot(dist);
+  }
+  playerHit(dmg, owner) {
+    const p = this.player; if (!p.alive || this.state === 'won' || this.state === 'boom') return;
+    p.tookDamage = true; p.lastHurt = this.t;
+    let d = dmg; const hadShield = p.shield > 0;
+    if (p.shield > 0) { const s = Math.min(p.shield, d); p.shield -= s; d -= s; if (hadShield && p.shield <= 0) sfx.shieldBreak(); }
+    p.hp -= d; sfx.hurt();
+    this.post.grade.uniforms.uHurt.value = Math.min(0.7, this.post.grade.uniforms.uHurt.value + 0.35);
+    const hf = UI.$('hurtfx'); hf.classList.add('on'); setTimeout(() => hf.classList.remove('on'), 90);
+    if (owner) {
+      const a = Math.atan2(owner.pos.x - p.pos.x, owner.pos.z - p.pos.z);
+      UI.damageDir(-(a - (p.yaw + PI)));
+      owner.aware = true;
+    }
+    if (p.hp <= 0) {
+      p.hp = 0; p.alive = false; this.deathT = 0;
+      UI.feed(owner ? owner.name : 'DEADLINE', PLAYER_NAME, { me: false });
+      this.lossReason = 'dead'; this.loseRound('dead');
+    }
+  }
+  whiz() { sfx.whiz(); }
+
+  // ── abilities ────────────────────────────────────────────────────────────
+  useDash(wx, wz, len) {
+    const p = this.player; if (p.cdQ > 0 || p.dashT > 0) return;
+    if (len < 0.1) { wx = -Math.sin(p.yaw); wz = -Math.cos(p.yaw); }
+    const L = Math.hypot(wx, wz); p.dashDir.set(wx / L, 0, wz / L);
+    p.dashT = 0.2; p.cdQ = DASH_CD; sfx.dash(); UI.pulse('abQ');
+    // burst of colour at the start
+    const cols = [[5, 1.2, 1.5], [5, 3.6, 0.5], [0.8, 3.6, 3.2], [4.6, 1, 4]];
+    this.ps.burst(new THREE.Vector3(p.pos.x, p.pos.y + 1, p.pos.z), 50, { speed: 5, color: cols, size: 0.12, life: 0.8, grav: -0.5, drag: 2 });
+  }
+  useUpdraft() {
+    const p = this.player; if (p.cdE > 0) return;
+    p.vel.y = 14.6; p.onGround = false; p.cdE = UP_CD; p.updraftT = 0.7; sfx.updraft(); UI.pulse('abE');
+    for (let i = 0; i < 60; i++) { const a = (i / 60) * PI * 2; this.ps.emit(p.pos.x + Math.cos(a) * 0.6, p.pos.y + 0.1, p.pos.z + Math.sin(a) * 0.6, Math.cos(a) * 7, 0.6, Math.sin(a) * 7, 2.6, 3.4, 3.6, 0.16, 0.6, 0, 3); }
+  }
+  windSwirl() {
+    const p = this.player; const t = this.t;
+    for (let i = 0; i < 5; i++) {
+      const a = t * 14 + i * 1.26; const r = 0.9 + Math.random() * 0.3;
+      this.ps.emit(p.pos.x + Math.cos(a) * r, p.pos.y - 0.4 + Math.random() * 1.2, p.pos.z + Math.sin(a) * r, -Math.sin(a) * 4, 3 + Math.random() * 3, Math.cos(a) * 4, 2.4, 3.2, 3.4, 0.09, 0.5, 0, 1);
+    }
+  }
+  useUlt() {
+    const p = this.player; if (p.ult < ULT_COST || p.ultT > 0) return;
+    p.ult = 0; p.ultT = ULT_TIME; this.timeScale = 0.4; sfx.ult(); UI.pulse('abX');
+    UI.banner('ULTIMATE', 'MAIN CHARACTER', 'EVERYTHING ELSE IS A SIDE QUEST', 'round', 1800);
+    UI.flash();
+  }
+  rescueCat() {
+    const p = this.player; p.catRescued = true;
+    p.hp = 100; p.shield = 50; p.ult = ULT_COST;
+    UI.toast('CAT RESCUED · +1000 AURA', 'FULL HEAL · FULL SHIELD · ULT READY', 2800);
+    sfx.aura(); sfx.meow();
+    const c = this.map.dyn.catHit;
+    this.ps.burst(c, 70, { speed: 5, color: [[5, 4, 1.2], [5, 1.4, 3], [1, 4, 3.6]], size: 0.12, life: 1.2, grav: -0.5, drag: 1.5 });
+  }
+
+  // ── final round ──────────────────────────────────────────────────────────
+  inPlantZone() { const c = this.map.dyn.plantCenter; const p = this.player.pos; return Math.hypot(p.x - c.x, p.z - c.z) < this.map.dyn.plantRadius && p.y < 0.6; }
+  plantCake() {
+    const p = this.player; p.carrying = false; p.plantT = 0; this.cakePlanted = true; this.cakeT = FINAL_ROUND.defendSeconds;
+    UI.show('plantbar', false); UI.tip(''); UI.show('cakechip', false); UI.show('tF', false);
+    const fwd = new THREE.Vector3(-Math.sin(p.yaw), 0, -Math.cos(p.yaw));
+    this.cake.position.set(p.pos.x + fwd.x * 0.9, p.pos.y, p.pos.z + fwd.z * 0.9); this.cake.visible = true;
+    this.cakeLight.position.copy(this.cake.position).add(new THREE.Vector3(0, 1, 0));
+    const d = this.map.dyn; d.plantBeacon.visible = false; this.plantLabel.visible = false;
+    sfx.planted(); UI.banner('CAKE PLANTED', 'DEFEND', `${FINAL_ROUND.defendSeconds} SECONDS · HOLD THE PANTRY`, 'round', 2200);
+    UI.$('objective').textContent = 'DEFEND THE CAKE';
+    this.beepT = 0;
+    // queue the rush
+    const spawns = ['bSite', 'backHall', 'bMain', 'mid', 'backHall2', 'bBoard'];
+    this.rushQueue = FINAL_ROUND.rushers.map((n, i) => ({ name: n, at: 1.5 + Math.floor(i / 2) * 6, post: spawns[i % spawns.length] }));
+    const all = this.bots.map((b) => b.name).concat(FINAL_ROUND.rushers);
+    UI.teamIcons(all); this.bots.forEach((b, i) => { b.teamIdx = i; if (!b.alive) UI.markBotDead(i); });
+    this.rushIdx = this.bots.length;
+  }
+  updateFinal(dt) {
+    if (!this.cakePlanted) return;
+    this.cakeT -= dt;
+    const elapsed = FINAL_ROUND.defendSeconds - this.cakeT;
+    // spawn rushers
+    while (this.rushQueue.length && this.rushQueue[0].at <= elapsed) {
+      const q = this.rushQueue.shift(); const pp = this.map.posts[q.post];
+      const b = new Bot(this.scene, q.name, pp[0], pp[1], { yaw: PI, difficulty: 2, hp: 80, rush: this.cake.position.clone() });
+      b.frozen = false; b.aware = true; b.teamIdx = this.rushIdx++; this.bots.push(b);
+    }
+    // beeps speed up
+    this.beepT -= dt; const interval = this.cakeT > 10 ? 1 : this.cakeT > 5 ? 0.5 : 0.25;
+    if (this.beepT <= 0) { this.beepT = interval; sfx.cakeBeep(); this.cake.userData.ring.material.opacity = 1; }
+    if (this.cakeT <= 0) this.detonate();
+  }
+  detonate() {
+    this.state = 'boom'; this.boomT = 0; this.cakeT = 0; this.score.me++;
+    const c = this.cake.position.clone().add(new THREE.Vector3(0, 0.6, 0));
+    sfx.boom(); UI.flash();
+    this.confetti.burst(c, 600, 16);
+    this.ps.burst(c, 120, { speed: 18, color: [[3, 0.7, 0.9], [3, 2.1, 0.3], [0.5, 2.2, 2], [2.6, 2.5, 2.3]], size: 0.22, life: 1.6, grav: 3, drag: 1.4 });
+    for (const b of this.bots) if (b.alive) { b.damage(9999, 1, false); }
+    this.timeScale = 0.5; this.slowT = 2.5;
+    this.post.grade.uniforms.uFlash.value = 0.3;
+    UI.tip(''); UI.$('objective').textContent = '';
+    this.input.fire = false;
+  }
+  updateBoom(dt) {
+    const t = this.boomT; const p = this.player;
+    this.post.grade.uniforms.uFlash.value = Math.max(0, this.post.grade.uniforms.uFlash.value - dt * 0.8);
+    // look up at the fireworks
+    p.pitch += (0.42 - p.pitch) * Math.min(1, dt * 1.2);
+    this.camera.rotation.set(p.pitch, p.yaw, 0);
+    this.fwT = (this.fwT || 0) - dt;
+    if (this.fwT <= 0) { this.fwT = 0.35 + Math.random() * 0.4; const c = this.cake.position; this.fireworks.launch(c.x + (Math.random() - 0.5) * 30 - Math.sin(p.yaw) * 20, c.z + (Math.random() - 0.5) * 30 - Math.cos(p.yaw) * 20); }
+    if (Math.random() < dt * 3) this.confetti.burst(new THREE.Vector3(p.pos.x + (Math.random() - 0.5) * 16, 9, p.pos.z + (Math.random() - 0.5) * 16), 40, 6);
+    this.vm.update(dt, { moving: false, speed: 0, onGround: true, lookDX: 0, lookDY: 0, lowered: true, tilt: 0 });
+    if (t > 1.5 && !this.bannerShown) { this.bannerShown = true; UI.banner('THE CAKE HAS DETONATED', 'HAPPY BIRTHDAY', 'MATCH WIN', 'win', 3000); sfx.win(); }
+    if (t > 5.2) this.showEnd();
+  }
+  showEnd() {
+    this.state = 'end'; this.input.unlock(); this.input.enabled = false; this.bannerShown = false;
+    UI.show('card', false); UI.show('pause', false); UI.stopNote();
+    UI.show('hud', false); UI.show('touch', false);
+    UI.showEnding(() => { this.score = { me: 0, them: 0 }; this.carryUlt = 0; UI.show('hud'); if (this.mobile) UI.show('touch'); this.input.enabled = true; this.input.lock(); this.startRound(0); });
+  }
+  endUpdate(dt) {
+    // keep the celebration going behind the ending screen
+    this.fwT = (this.fwT || 0) - dt; const p = this.player;
+    if (this.fwT <= 0) { this.fwT = 0.5 + Math.random() * 0.6; const c = this.cake.position; this.fireworks.launch(c.x + (Math.random() - 0.5) * 34 - Math.sin(p.yaw) * 22, c.z + (Math.random() - 0.5) * 34 - Math.cos(p.yaw) * 22); }
+    this.fireworks.update(dt); this.ps.update(dt); this.confetti.update(dt);
+    p.yaw += dt * 0.04; this.camera.rotation.set(p.pitch, p.yaw, 0);
+  }
+
+  // ── world animation ──────────────────────────────────────────────────────
+  animateWorld(dt) {
+    const d = this.map.dyn; const t = this.t;
+    // barrier drop
+    if (this.barrierAnim) {
+      this.barrierAnim += dt; const k = Math.min(1, this.barrierAnim / 0.7);
+      d.barrier.position.y = 2.5 - k * k * 5.2; d.barrier.material.uniforms.uA.value = 1 - k * 0.5;
+      if (k >= 1) { d.barrier.visible = false; this.barrierAnim = 0; }
+    }
+    d.barrier.material.uniforms.uTime.value = t;
+    for (const c of d.clouds) { c.userData.a += c.userData.sp * dt; c.position.x = Math.cos(c.userData.a) * c.userData.d; c.position.z = Math.sin(c.userData.a) * c.userData.d; }
+    // cat idles: tail sway + head look
+    if (d.cat) { d.cat.userData.tail.rotation.y = Math.sin(t * 2.2) * 0.35; d.cat.userData.head.rotation.y = Math.sin(t * 0.5) * 0.4; }
+    // fountain spray
+    if (dt > 0 && Math.random() < 0.9) { const f = d.fountain; for (let i = 0; i < 2; i++) { const a = Math.random() * PI * 2; this.ps.emit(f.x, f.y, f.z, Math.cos(a) * 1.2, 2.6 + Math.random(), Math.sin(a) * 1.2, 1.4, 2.2, 2.4, 0.07, 0.75, 7, 0); } }
+    // string-light twinkle
+    if (d.bulbs && Math.floor(t * 4) !== this.twk) {
+      this.twk = Math.floor(t * 4); const im = d.bulbs; const c = new THREE.Color();
+      for (let i = 0; i < 6; i++) { const k = (Math.random() * im.count) | 0; c.copy(d.bulbCols[k % 4]).multiplyScalar(0.5 + Math.random() * 0.8); im.setColorAt(k, c); }
+      im.instanceColor.needsUpdate = true;
+    }
+    // neon flicker
+    d.signs.forEach((s, i) => { if (i === 3) s.material.opacity = Math.sin(t * 23) > 0.97 || Math.sin(t * 7.3 + 1) > 0.995 ? 0.5 : 1; });
+    // plant marker
+    if (d.plantRing.visible) { d.plantRing.material.opacity = 0.5 + Math.sin(t * 4) * 0.3; this.plantLabel.position.y = 4.2 + Math.sin(t * 2) * 0.15; }
+    // cake
+    if (this.cake.visible) {
+      this.cake.userData.flames.forEach((f, i) => { f.scale.set(1 + Math.sin(t * 20 + i) * 0.2, 1.6 + Math.sin(t * 17 + i * 2) * 0.4, 1); });
+      const r = this.cake.userData.ring; r.material.opacity = Math.max(0.15, r.material.opacity - dt * 2); r.scale.setScalar(1 + (1 - r.material.opacity) * 0.8);
+      this.cakeLight.intensity = 2.5 + Math.sin(t * 25) * 0.6;
+    } else this.cakeLight.intensity = 0;
+  }
+
+  // ── HUD ──────────────────────────────────────────────────────────────────
+  set(id, key, val, fn) { if (this.hudCache[key] !== val) { this.hudCache[key] = val; fn(UI.$(id), val); } }
+  updateHUD() {
+    const p = this.player;
+    const hp = Math.ceil(p.hp), sh = Math.ceil(p.shield);
+    this.set('hpNum', 'hp', hp, (el, v) => { el.textContent = v; el.classList.toggle('low', v < 30); });
+    this.set('shNum', 'sh', sh, (el, v) => (el.textContent = v));
+    this.set('hpBar', 'hpb', hp, (el, v) => (el.style.width = v + '%'));
+    this.set('shBar', 'shb', sh, (el, v) => (el.style.width = (v / 50) * 100 + '%'));
+    this.set('hurtfx', 'low', p.hp < 30 && p.alive, (el, v) => el.classList.toggle('low', v));
+    const ammoTxt = p.reloadT > 0 ? '··' : String(p.ammo);
+    this.set('ammo', 'ammo', ammoTxt, (el, v) => { el.textContent = v; el.classList.toggle('low', p.ammo <= 5 && p.reloadT <= 0); });
+    this.set('scoreMe', 'sm', this.score.me, (el, v) => (el.textContent = v));
+    this.set('scoreThem', 'st', this.score.them, (el, v) => (el.textContent = v));
+    let tm;
+    if (this.state === 'boom') tm = 'GG';
+    else if (this.cakePlanted && this.state === 'live') tm = '🎂 ' + Math.max(0, Math.ceil(this.cakeT));
+    else if (this.state === 'buy') tm = '0:' + String(Math.max(0, Math.ceil(5.1 - this.buyT))).padStart(2, '0');
+    else { const s = Math.max(0, Math.ceil(this.roundTime)); tm = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+    this.set('timer', 'tm', tm, (el, v) => { el.textContent = v; el.classList.toggle('urgent', !this.cakePlanted && this.roundTime < 20); el.classList.toggle('cake', !!this.cakePlanted); });
+    const ab = (id, cd, max, key) => this.set(id, key, cd > 0 ? Math.ceil(cd * 10) : 0, (el) => {
+      el.classList.toggle('ready', cd <= 0);
+      el.querySelector('.cd').style.height = `${(cd / max) * 100}%`;
+      el.querySelector('.cdn').textContent = cd > 0 ? Math.ceil(cd) : '';
+    });
+    ab('abQ', p.cdQ, DASH_CD, 'q'); ab('abE', p.cdE, UP_CD, 'e');
+    this.set('pips', 'ult', p.ult + (p.ultT > 0 ? 10 : 0), (el) => {
+      el.innerHTML = Array.from({ length: ULT_COST }, (_, i) => `<i class="${i < p.ult ? 'on' : ''}"></i>`).join('');
+      UI.$('abX').classList.toggle('ready', p.ult >= ULT_COST); UI.$('tX').classList.toggle('ready', p.ult >= ULT_COST);
+      UI.$('cross').classList.toggle('gold', p.ultT > 0);
+    });
+    this.drawMinimap();
+  }
+
+  buildMinimap() {
+    const S = 3.8, W = 360, H = 300, ox = W / 2, oz = H / 2;
+    this.mm = { S, ox, oz, cv: UI.$('minimap'), base: document.createElement('canvas') };
+    const b = this.mm.base; b.width = W; b.height = H; const x = b.getContext('2d');
+    x.fillStyle = 'rgba(236,232,225,0.10)'; x.fillRect(ox - 45 * S, oz - 35 * S, 90 * S, 70 * S);
+    x.fillStyle = 'rgba(15,25,35,0.9)';
+    for (const s of solids) {
+      if (s.max[1] < 1.6 || s.min[1] > 2 || s.tag === 'barrier') continue;
+      x.fillRect(ox + s.min[0] * S, oz + s.min[2] * S, (s.max[0] - s.min[0]) * S, (s.max[2] - s.min[2]) * S);
+    }
+    x.fillStyle = 'rgba(236,232,225,0.25)';
+    for (const s of solids) { if (s.max[1] >= 1.6 || s.tag === 'barrier') continue; x.fillRect(ox + s.min[0] * S, oz + s.min[2] * S, (s.max[0] - s.min[0]) * S, (s.max[2] - s.min[2]) * S); }
+    x.font = '28px "Bebas Neue", Impact, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillStyle = 'rgba(255,70,85,0.85)'; x.fillText('A', ox - 27 * S, oz - 27 * S); x.fillText('B', ox + 30 * S, oz - 21 * S);
+    x.fillStyle = 'rgba(236,232,225,0.4)'; x.font = '18px "Bebas Neue", Impact, sans-serif'; x.fillText('MID', ox, oz + 10 * S);
+  }
+  drawMinimap() {
+    const { S, ox, oz, cv, base } = this.mm; const x = cv.getContext('2d');
+    x.clearRect(0, 0, cv.width, cv.height); x.drawImage(base, 0, 0);
+    if (this.R && this.R.final && !this.cakePlanted) { x.strokeStyle = '#FFC21A'; x.lineWidth = 2; x.beginPath(); x.arc(ox - 27 * S, oz - 27 * S, 4.5 * S, 0, 7); x.stroke(); }
+    if (this.cake.visible) { x.fillStyle = '#FFC21A'; x.beginPath(); x.arc(ox + this.cake.position.x * S, oz + this.cake.position.z * S, 5, 0, 7); x.fill(); }
+    for (const b of this.bots) {
+      if (!b.alive) continue;
+      const px = ox + b.pos.x * S, pz = oz + b.pos.z * S;
+      x.fillStyle = b.canSee ? '#FF4655' : 'rgba(255,70,85,0.55)';
+      x.save(); x.translate(px, pz); x.rotate(PI / 4); x.fillRect(-4, -4, 8, 8); x.restore();
+    }
+    const p = this.player; const px = ox + p.pos.x * S, pz = oz + p.pos.z * S;
+    x.save(); x.translate(px, pz); x.rotate(-p.yaw);
+    x.fillStyle = 'rgba(127,227,214,0.25)'; x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, 34, -PI / 2 - 0.6, -PI / 2 + 0.6); x.fill();
+    x.fillStyle = '#7fe3d6'; x.beginPath(); x.moveTo(0, -8); x.lineTo(6, 6); x.lineTo(0, 3); x.lineTo(-6, 6); x.closePath(); x.fill();
+    x.restore();
+  }
+}
+
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function loadSettings(mobile) {
+  const d = { volume: 0.8, sens: 1, quality: null };
+  try { return { ...d, ...JSON.parse(localStorage.getItem('chikorant') || '{}') }; } catch (e) { return d; }
+}
+function saveSettings(s) { try { localStorage.setItem('chikorant', JSON.stringify(s)); } catch (e) { /* */ } }
+export { getVolume };

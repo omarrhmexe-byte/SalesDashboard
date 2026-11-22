@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0F1923" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>CHIKORANT</title>
+<meta name="description" content="A tactical birthday card. Happy birthday, Chikero." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230F1923'/%3E%3Cpath d='M10 12h12l20 30V12h12v40H44L24 22v30H10z' fill='%23FF4655'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Bebas+Neue&family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet" />
+
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- ───────────────────────── HUD ───────────────────────── -->
+<div id="hud" class="hud" hidden>
+  <canvas id="minimap" width="360" height="300"></canvas>
+  <div class="topbar">
+    <div class="team left" id="teamL"></div>
+    <div class="sc me" id="scoreMe">0</div>
+    <div class="timer"><div id="timer">1:40</div><div class="rdlabel" id="rdlabel">ROUND 1</div></div>
+    <div class="sc them" id="scoreThem">0</div>
+    <div class="team right" id="teamR"></div>
+  </div>
+  <div class="objective" id="objective"></div>
+  <div class="feed" id="feed"></div>
+  <div class="cross" id="cross"><i class="d"></i><i class="l"></i><i class="r"></i><i class="t"></i><i class="b"></i></div>
+  <div class="hitm" id="hitm"><i></i><i></i><i></i><i></i></div>
+  <div class="dmgdirs" id="dmgdirs"></div>
+  <div class="vitals">
+    <div class="hpbox">
+      <div class="shield"><svg viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5z"/></svg><span id="shNum">50</span></div>
+      <div class="hpnum" id="hpNum">100</div>
+    </div>
+    <div class="hpbars"><div class="bar sh"><b id="shBar"></b></div><div class="bar hp"><b id="hpBar"></b></div></div>
+  </div>
+  <div class="abil" id="abil">
+    <div class="ab" data-k="Q" id="abQ"><span class="key">Q</span><svg viewBox="0 0 32 32" class="ico"><path d="M4 22c6-1 10-6 14-12l3 4c2-3 4-5 7-6-2 4-4 8-8 11l-3-3c-3 3-7 6-13 6z"/></svg><span class="nm">GARBA DASH</span><div class="cd"></div><span class="cdn"></span></div>
+    <div class="ab" data-k="E" id="abE"><span class="key">E</span><svg viewBox="0 0 32 32" class="ico"><path d="M16 3l7 9h-4v6h-6v-6H9zM6 22c4 0 6 2 10 2s6-2 10-2v3c-4 0-6 2-10 2s-6-2-10-2z"/></svg><span class="nm">CAT RESCUE</span><div class="cd"></div><span class="cdn"></span></div>
+    <div class="ab ult" data-k="X" id="abX"><span class="key">X</span><svg viewBox="0 0 32 32" class="ico"><path d="M16 2l4 9 10 1-7.5 6.5L25 29l-9-5-9 5 2.5-10.5L2 12l10-1z"/></svg><span class="nm">MAIN CHARACTER</span><div class="pips" id="pips"></div></div>
+  </div>
+  <div class="ammo">
+    <div class="ammonum"><span id="ammo">25</span><small>/ <span class="inf">∞</span></small></div>
+    <div class="gunname"><svg viewBox="0 0 64 20"><path d="M2 8h34l4-3h10l2 3h10v4H40l-4 6h-6l2-6H2z"/></svg>THE AUX CORD</div>
+    <div class="cakechip" id="cakechip" hidden>🎂 CAKE CARRIER</div>
+  </div>
+  <div class="tip" id="tip"></div>
+  <div class="plantbar" id="plantbar" hidden><div class="pl">PLANTING THE CAKE</div><div class="pb"><b id="plantFill"></b></div></div>
+  <div class="banner" id="banner"><div class="b1" id="b1"></div><div class="b2" id="b2"></div><div class="b3" id="b3"></div></div>
+  <div class="toast" id="toast"></div>
+  <div class="countdown" id="countdown"></div>
+  <div class="goldfx" id="goldfx"></div>
+  <div class="hurtfx" id="hurtfx"></div>
+  <div class="flashfx" id="flashfx"></div>
+  <button class="pausebtn" id="pauseBtn" aria-label="Pause">❚❚</button>
+</div>
+
+<!-- ───────────────────────── TOUCH ───────────────────────── -->
+<div id="touch" class="touch" hidden>
+  <div class="stick" id="stick"><div class="knob" id="knob"></div></div>
+  <div class="tb fire" id="tFire">FIRE</div>
+  <div class="tb jump" id="tJump">JUMP</div>
+  <div class="tb reload" id="tR">R</div>
+  <div class="tb q" id="tQ">Q</div>
+  <div class="tb e" id="tE">E</div>
+  <div class="tb x" id="tX">X</div>
+  <div class="tb f" id="tF" hidden>PLANT</div>
+</div>
+
+<!-- ───────────────────────── SCREENS ───────────────────────── -->
+<div id="splash" class="scr splash">
+  <div class="splashInner">
+    <div class="sub">A TACTICAL BIRTHDAY CARD</div>
+    <h1 class="logo">CHIKO<span>RANT</span></h1>
+    <div class="press" id="press">CLICK ANYWHERE TO START</div>
+    <div class="loading" id="loading">LOADING ZYOIN HQ…</div>
+  </div>
+  <div class="fineprint">A private, non-commercial fan gift. Not affiliated with any game studio.</div>
+</div>
+
+<div id="select" class="scr select" hidden>
+  <div class="selTop"><span class="selMode">COMPETITIVE · ZYOIN HQ</span><span class="selTitle">CHOOSE YOUR AGENT</span><span class="selTimer" id="selTimer">80</span></div>
+  <div class="selBody">
+    <div class="selLeft">
+      <div class="agentName" id="agentName">CHIKERO</div>
+      <div class="role"><span class="roleIco">◆</span> ROLE <b>CONTROLLER OF VIBES</b></div>
+      <p class="bio">Partnerships lead. Sponsor magnet. The only marketer ever to win a WOW Champ. Called "too much" on day one — turned out to be exactly enough.</p>
+      <div class="passive"><span>PASSIVE</span><b>TOO MUCH (APPROVED)</b><em>Shield regenerates after 4s out of combat. Vibes regenerate always.</em></div>
+      <div class="abilities" id="abilities"></div>
+    </div>
+    <div class="selCenter"><div class="portrait" id="portrait"><img id="portraitImg" alt="Agent Chikero" /><div class="portraitGlow"></div></div></div>
+    <div class="selRight">
+      <div class="controls" id="controls"></div>
+    </div>
+  </div>
+  <div class="selBottom">
+    <div class="agentRow" id="agentRow"></div>
+    <button class="lockin" id="lockin">LOCK IN</button>
+  </div>
+  <div class="lockflash" id="lockflash"></div>
+</div>
+
+<div id="intro" class="scr intro" hidden>
+  <div class="introInner">
+    <div class="sub">MAP</div>
+    <div class="mapname">ZYOIN HQ</div>
+    <div class="mapsub">BANGALORE · MEDITERRANEAN COURTYARD CAMPUS</div>
+    <div class="side">ATTACKING</div>
+  </div>
+</div>
+
+<div id="pause" class="scr pause" hidden>
+  <div class="pausePanel">
+    <h2>PAUSED</h2>
+    <button class="btn" id="resume">RESUME</button>
+    <label class="row">VOLUME <input type="range" id="vol" min="0" max="1" step="0.01" /></label>
+    <label class="row">SENSITIVITY <input type="range" id="sens" min="0.3" max="2.5" step="0.05" /></label>
+    <label class="row">QUALITY <select id="quality"><option value="high">HIGH</option><option value="low">PERFORMANCE</option></select></label>
+    <button class="btn ghost" id="restart">RESTART ROUND</button>
+    <div class="pauseKeys" id="pauseKeys"></div>
+  </div>
+</div>
+
+<div id="card" class="scr cardscr" hidden>
+  <div class="card">
+    <div class="cardPhoto"><img id="cardImg" alt="" /><div class="cardTag" id="cardTag">VOICE NOTE</div></div>
+    <div class="cardBody">
+      <div class="cardWin" id="cardWin">ROUND WIN</div>
+      <div class="cardTitle" id="cardTitle">VOICE NOTE UNLOCKED</div>
+      <div class="cardFrom" id="cardFrom">FROM BERRY</div>
+      <p class="cardLine" id="cardLine"></p>
+      <div class="player" id="player">
+        <button class="play" id="playBtn" aria-label="Play voice note">▶</button>
+        <div class="wave" id="wave"><canvas id="waveCv" width="600" height="80"></canvas></div>
+        <div class="time" id="ptime">0:00</div>
+      </div>
+      <button class="btn" id="nextBtn">NEXT ROUND ▸</button>
+    </div>
+  </div>
+</div>
+
+<div id="dead" class="scr deadscr" hidden>
+  <div class="deadInner">
+    <div class="sub" id="deadSub">ELIMINATED</div>
+    <div class="deadTitle">RUN IT BACK?</div>
+    <p class="deadLine" id="deadLine">The deadlines got lucky. They always do on Mondays.</p>
+    <button class="btn" id="retryBtn">RUN IT BACK</button>
+  </div>
+</div>
+
+<div id="ending" class="scr ending" hidden>
+  <div class="endInner">
+    <div class="endPhoto"><img id="endImg" alt="Chikero" /></div>
+    <div class="endBody">
+      <div class="gg" id="gg">GG · WP</div>
+      <div class="endLines" id="endLines"></div>
+      <div class="xoxo" id="xoxo">XOXO</div>
+      <div class="notes" id="notes"></div>
+      <button class="btn" id="againBtn">PLAY AGAIN</button>
+    </div>
+  </div>
+</div>
+
+<div id="rotate" class="rotate" hidden><div class="rotIco">📱↻</div><div>ROTATE TO LANDSCAPE</div><small>CHIKORANT plays sideways</small></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
