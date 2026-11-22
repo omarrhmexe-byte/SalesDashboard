@@ -38,18 +38,27 @@ export class Input {
 
   setupTouch() {
     const stick = document.getElementById('stick'), knob = document.getElementById('knob');
-    let stickId = null, sx = 0, sy = 0; const R = 60;
+    let stickId = null, sx = 0, sy = 0; const R = 56;
+    const home = { l: stick.style.left, b: stick.style.bottom };
+    const grab = (t, cx, cy) => {
+      stickId = t.identifier; sx = cx; sy = cy; this.updStick(t.clientX - sx, t.clientY - sy, knob, R);
+    };
     stick.addEventListener('touchstart', (e) => {
-      e.preventDefault(); const t = e.changedTouches[0]; stickId = t.identifier;
-      const r = stick.getBoundingClientRect(); sx = r.left + r.width / 2; sy = r.top + r.height / 2; this.updStick(t.clientX - sx, t.clientY - sy, knob, R);
+      e.preventDefault(); if (stickId !== null) return; const t = e.changedTouches[0];
+      const r = stick.getBoundingClientRect(); grab(t, r.left + r.width / 2, r.top + r.height / 2);
     }, { passive: false });
-    // aim: any touch that starts on the right half (not on a button)
+    // Aim: any touch that starts on the right 60% and not on a button. A touch that starts on a
+    // button (or the stick, or a screen) never aims. The empty left 40% spawns a floating stick.
     let aimId = null, ax = 0, ay = 0;
     addEventListener('touchstart', (e) => {
       if (!this.enabled) return;
       for (const t of e.changedTouches) {
-        if (t.target.closest && t.target.closest('.tb, .stick, button, .scr')) continue;
-        if (t.clientX > innerWidth * 0.4 && aimId === null) { aimId = t.identifier; ax = t.clientX; ay = t.clientY; }
+        if (t.target.closest && t.target.closest('.tb, .stick, button, .scr, input, select')) continue;
+        if (t.clientX > innerWidth * 0.4) { if (aimId === null) { aimId = t.identifier; ax = t.clientX; ay = t.clientY; } }
+        else if (stickId === null) {
+          const half = stick.offsetWidth / 2; stick.style.left = `${Math.max(half, t.clientX) - half}px`; stick.style.bottom = `${Math.max(8, innerHeight - t.clientY - half)}px`;
+          stick.classList.add('float'); const r = stick.getBoundingClientRect(); grab(t, r.left + r.width / 2, r.top + r.height / 2);
+        }
       }
     }, { passive: true });
     addEventListener('touchmove', (e) => {
@@ -64,7 +73,7 @@ export class Input {
     }, { passive: false });
     const end = (e) => {
       for (const t of e.changedTouches) {
-        if (t.identifier === stickId) { stickId = null; this.move.x = this.move.y = 0; knob.style.transform = ''; }
+        if (t.identifier === stickId) { stickId = null; this.move.x = this.move.y = 0; knob.style.transform = ''; stick.style.left = home.l; stick.style.bottom = home.b; stick.classList.remove('float'); }
         if (t.identifier === aimId) aimId = null;
       }
     };

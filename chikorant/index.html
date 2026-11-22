@@ -87,22 +87,23 @@
   <div class="selTop"><span class="selMode">COMPETITIVE · ZYOIN HQ</span><span class="selTitle">CHOOSE YOUR AGENT</span><span class="selTimer" id="selTimer">80</span></div>
   <div class="selBody">
     <div class="selLeft">
+      <div class="kicker">AGENT 01 <i></i> CONTROLLER</div>
       <div class="agentName" id="agentName">CHIKERO</div>
-      <div class="role"><span class="roleIco">◆</span> ROLE <b>CONTROLLER OF VIBES</b></div>
+      <div class="role"><span class="roleIco">◆</span><span class="rl">ROLE</span><b>CONTROLLER OF VIBES</b></div>
       <p class="bio">Partnerships lead. Sponsor magnet. The only marketer ever to win a WOW Champ. Called "too much" on day one — turned out to be exactly enough.</p>
-      <div class="passive"><span>PASSIVE</span><b>TOO MUCH (APPROVED)</b><em>Shield regenerates after 4s out of combat. Vibes regenerate always.</em></div>
-      <div class="abilities" id="abilities"></div>
     </div>
-    <div class="selCenter"><div class="portrait" id="portrait"><img id="portraitImg" alt="Agent Chikero" /><div class="portraitGlow"></div></div></div>
+    <div class="selCenter"><div class="portrait" id="portrait"><img id="portraitImg" alt="Agent Chikero" /><div class="portraitGlow"></div><div class="portraitTag">CHIKERO</div></div></div>
     <div class="selRight">
-      <div class="controls" id="controls"></div>
+      <div class="abilities" id="abilities"></div>
     </div>
   </div>
   <div class="selBottom">
-    <div class="agentRow" id="agentRow"></div>
+    <div class="controls" id="controls"></div>
     <button class="lockin" id="lockin">LOCK IN</button>
+    <div class="agentRow" id="agentRow"></div>
   </div>
   <div class="lockflash" id="lockflash"></div>
+  <div class="lockring"></div>
 </div>
 
 <div id="intro" class="scr intro" hidden>
@@ -139,6 +140,7 @@
         <div class="wave" id="wave"><canvas id="waveCv" width="600" height="80"></canvas></div>
         <div class="time" id="ptime">0:00</div>
       </div>
+      <div class="playHint">TAP PLAY TO HEAR IT</div>
       <button class="btn" id="nextBtn">NEXT ROUND ▸</button>
     </div>
   </div>
@@ -150,6 +152,7 @@
     <div class="deadTitle">RUN IT BACK?</div>
     <p class="deadLine" id="deadLine">The deadlines got lucky. They always do on Mondays.</p>
     <button class="btn" id="retryBtn">RUN IT BACK</button>
+    <div class="deadHint">OR PRESS ENTER</div>
   </div>
 </div>
 
@@ -160,13 +163,14 @@
       <div class="gg" id="gg">GG · WP</div>
       <div class="endLines" id="endLines"></div>
       <div class="xoxo" id="xoxo">XOXO</div>
+      <div class="notesLbl">REPLAY VOICE NOTES</div>
       <div class="notes" id="notes"></div>
       <button class="btn" id="againBtn">PLAY AGAIN</button>
     </div>
   </div>
 </div>
 
-<div id="rotate" class="rotate" hidden><div class="rotIco">📱↻</div><div>ROTATE TO LANDSCAPE</div><small>CHIKORANT plays sideways</small></div>
+<div id="rotate" class="rotate" hidden><div class="rotIco"><svg viewBox="0 0 48 48"><rect x="14" y="4" width="20" height="40" rx="4"/><rect class="scr2" x="17" y="9" width="14" height="26" rx="1"/></svg></div><div>ROTATE TO LANDSCAPE</div><small>CHIKORANT plays sideways</small></div>
 
 <script type="module" src="/src/main.js"></script>
 </body>
