@@ -10,19 +10,27 @@ export { show };
 const BOT_ICON = '<svg viewBox="0 0 24 24"><path d="M12 3c4.5 0 8 3 8 7v2H4v-2c0-4 3.5-7 8-7zm-7 10h14v2c0 3-3 6-7 6s-7-3-7-6z"/><rect x="6" y="9" width="12" height="2.4" fill="#0F1923"/></svg>';
 const HS_ICON = '<svg class="hs" viewBox="0 0 24 24"><path d="M12 2a8 8 0 018 8v3h-2v4l-6 5-6-5v-4H4v-3a8 8 0 018-8zm-3 9a1.6 1.6 0 100 3.2A1.6 1.6 0 009 11zm6 0a1.6 1.6 0 100 3.2 1.6 1.6 0 000-3.2z"/></svg>';
 
+const ICONS = {
+  P: 'M16 28S4 20 4 11a6.5 6.5 0 0112-3 6.5 6.5 0 0112 3c0 9-12 17-12 17z',
+  Q: 'M4 22c6-1 10-6 14-12l3 4c2-3 4-5 7-6-2 4-4 8-8 11l-3-3c-3 3-7 6-13 6z',
+  E: 'M16 3l7 9h-4v6h-6v-6H9zM6 22c4 0 6 2 10 2s6-2 10-2v3c-4 0-6 2-10 2s-6-2-10-2z',
+  X: 'M16 2l4 9 10 1-7.5 6.5L25 29l-9-5-9 5 2.5-10.5L2 12l10-1z',
+};
 export const ABILITIES = [
-  { k: 'Q', name: 'GARBA DASH', desc: 'Dash fast in your movement direction, leaving a festival-coloured trail. 3s cooldown.' },
-  { k: 'E', name: 'CAT RESCUE', desc: 'Launch into a huge updraft jump. High places, scared cats, no ladder needed. 6s cooldown.' },
-  { k: 'X', name: 'MAIN CHARACTER', desc: 'Ultimate. 7s of slow-mo, double damage and golden-hour lighting. Charged by 5 kills.', ult: true },
+  { k: 'P', tag: 'PASSIVE', name: 'TOO MUCH (APPROVED)', desc: 'Shield regenerates after 4s out of combat. Vibes regenerate always.', passive: true },
+  { k: 'Q', tag: 'SIGNATURE', name: 'GARBA DASH', desc: 'Dash fast in your movement direction, leaving a festival-coloured trail. 3s cooldown.' },
+  { k: 'E', tag: 'BASIC', name: 'CAT RESCUE', desc: 'Launch into a huge updraft jump. High places, scared cats, no ladder needed. 6s cooldown.' },
+  { k: 'X', tag: 'ULTIMATE', name: 'MAIN CHARACTER', desc: '7s of slow-mo, double damage and golden-hour lighting. Charged by 5 kills.', ult: true },
 ];
 
 export function buildSelect(mobile) {
   const ab = $('abilities');
-  ab.innerHTML = ABILITIES.map((a) => `<div class="a ${a.ult ? 'ult' : ''}"><div class="k">${a.k}</div><div><b>${a.name}</b><em>${a.desc}</em></div></div>`).join('');
+  ab.innerHTML = ABILITIES.map((a) => `<div class="a ${a.ult ? 'ult' : ''} ${a.passive ? 'pas' : ''}"><div class="k"><svg viewBox="0 0 32 32"><path d="${ICONS[a.k]}"/></svg><i>${a.passive ? '' : a.k}</i></div><div class="tx"><span class="tg">${a.tag}</span><b>${a.name}</b><em>${a.desc}</em></div></div>`).join('');
   const rows = mobile
     ? [['STICK', 'Move (left thumb)'], ['DRAG', 'Aim (right side)'], ['FIRE', 'Shoot (drag to aim too)'], ['JUMP', 'Jump'], ['Q E X', 'Abilities'], ['PLANT', 'Hold to plant the cake']]
     : [['WASD', 'Move'], ['MOUSE', 'Aim'], ['CLICK', 'Fire (hold for full-auto)'], ['R', 'Reload'], ['SPACE', 'Jump'], ['SHIFT', 'Walk (quiet + accurate)'], ['Q', 'Garba Dash'], ['E', 'Cat Rescue'], ['X', 'Main Character (ult)'], ['F', 'Hold to plant the cake'], ['ESC', 'Pause / settings']];
-  $('controls').innerHTML = `<h4>${mobile ? 'TOUCH CONTROLS' : 'CONTROLS'}</h4>` + rows.map(([k, v]) => `<kbd>${k}</kbd><span>${v}</span>`).join('');
+  const short = mobile ? [['STICK', 'Move'], ['DRAG', 'Aim'], ['FIRE', 'Shoot'], ['Q E X', 'Abilities']] : [['WASD', 'Move'], ['MOUSE', 'Aim'], ['CLICK', 'Fire'], ['R', 'Reload'], ['SPACE', 'Jump'], ['Q E X', 'Abilities'], ['ESC', 'Pause']];
+  $('controls').innerHTML = short.map(([k, v]) => `<span class="ch"><kbd>${k}</kbd>${v}</span>`).join('');
   $('pauseKeys').innerHTML = rows.map(([k, v]) => `${k} · ${v}`).join('<br>');
   const row = $('agentRow');
   const fake = ['?', '?', '?', '', '?', '?', '?'];
@@ -107,7 +115,7 @@ function fmt(s) { s = Math.max(0, Math.floor(s || 0)); return `${Math.floor(s / 
 function setupPlayer(src) {
   audioEl = new Audio(src); audioEl.preload = 'metadata';
   const btn = $('playBtn'), cv = $('waveCv'), cx = cv.getContext('2d');
-  btn.textContent = '▶'; btn.classList.remove('playing'); $('ptime').textContent = '0:00';
+  btn.textContent = '▶'; btn.classList.remove('playing'); $('player').classList.remove('started'); $('ptime').textContent = '0:00';
   // pseudo-waveform bars (deterministic per file)
   let seed = 0; for (const ch of src) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
   const bars = []; for (let i = 0; i < 60; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; bars.push(0.25 + (seed / 4294967296) * 0.75 * (0.6 + 0.4 * Math.sin(i * 0.4))); }
@@ -122,7 +130,7 @@ function setupPlayer(src) {
   audioEl.addEventListener('ended', () => { btn.textContent = '↺'; btn.classList.remove('playing'); duck(false); });
   btn.onclick = () => {
     if (!audioEl) return;
-    if (audioEl.paused) { audioEl.play().then(() => { btn.textContent = '❚❚'; btn.classList.add('playing'); duck(true); }).catch(() => {}); }
+    if (audioEl.paused) { audioEl.play().then(() => { btn.textContent = '❚❚'; btn.classList.add('playing'); $('player').classList.add('started'); duck(true); }).catch(() => {}); }
     else { audioEl.pause(); btn.textContent = '▶'; btn.classList.remove('playing'); duck(false); }
   };
   $('wave').onclick = (e) => { if (!audioEl || !audioEl.duration) return; const r = e.currentTarget.getBoundingClientRect(); audioEl.currentTime = ((e.clientX - r.left) / r.width) * audioEl.duration; };
@@ -144,6 +152,7 @@ export function showDead(sub, onRetry) {
   show('dead');
   $('retryBtn').onclick = () => { sfx.click(); show('dead', false); onRetry(); };
 }
+addEventListener('keydown', (e) => { if (!$('dead').hidden && (e.code === 'Enter' || e.code === 'NumpadEnter')) { e.preventDefault(); $('retryBtn').click(); } });
 
 // ── ending ──────────────────────────────────────────────────────────────────
 let endAudio = null;
