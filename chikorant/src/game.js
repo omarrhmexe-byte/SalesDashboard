@@ -481,7 +481,7 @@ export class Game {
   shoot() {
     const p = this.player; const cam = this.camera;
     p.ammo--; p.fireCd = FIRE_DT; p.lastShot = this.t;
-    const i = p.shotIdx;
+    const i = p.shotIdx; const ult = p.ultT > 0;
     // recoil: first shots accurate, then climb, then horizontal sway
     const kp = i < 2 ? 0.002 : Math.min(0.012, 0.004 + i * 0.0012);
     p.recoilP = Math.min(0.11, p.recoilP + kp);
@@ -513,28 +513,42 @@ export class Game {
     const c = this.map.dyn.catHit;
     const tc = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, c.x, c.y, c.z, 0.5);
     const end = o.clone().addScaledVector(dir, Math.min(hitT, maxT, tc > 0 ? tc : 1e9));
+    const back = _v2.copy(dir).negate();
     if (tc > 0 && tc < hitT && tc < maxT) {
       UI.toast('NEVER. THE CAT IS SAFE.', 'NICE TRY', 1800); sfx.catSafe(); sfx.meow();
       this.ps.burst(end, 16, { speed: 3, color: [[5, 4, 1], [5, 1.5, 3]], size: 0.08, life: 0.6, grav: -1 });
     } else if (hitBot) {
-      const mult = (head ? HS_MULT : 1) * (p.ultT > 0 ? 2 : 1);
+      const mult = (head ? HS_MULT : 1) * (ult ? 2 : 1);
       const dmg = DMG_BODY * mult;
-      const killed = hitBot.damage(dmg, 1, head);
-      this.ps.burst(end, head ? 18 : 10, { speed: head ? 6 : 4, color: head ? [5, 4, 1.4] : [5, 1.2, 1.4], size: 0.07, life: 0.3, grav: 8 });
+      const killed = hitBot.damage(dmg, 1, head, dir);
+      if (head) {
+        // headshot: a crown of gold sparks + bright glints, unmistakably different from a body hit
+        this.ps.sparkBurst(end, 30, { speed: 10, color: [[6, 4.4, 1.1], [6, 5.4, 2.6], [5, 3.2, 0.6]], width: 0.017, life: 0.45, dir: back, spread: 1.2, grav: 9 });
+        this.ps.burst(end, 10, { speed: 2.5, color: [6, 4.8, 1.6], size: 0.13, life: 0.3, grav: 1 });
+        this.ps.burst(end, 1, { speed: 0, color: [6, 5, 2.4], size: 0.7, life: 0.09, grav: 0 });
+      } else {
+        this.ps.sparkBurst(end, 12, { speed: 6.5, color: [[5, 1.1, 1.4], [5, 2.8, 1.2]], width: 0.012, life: 0.28, dir: back, spread: 1 });
+        this.ps.burst(end, 6, { speed: 3, color: [5, 1.2, 1.4], size: 0.08, life: 0.25, grav: 8 });
+        this.ps.burst(end, 1, { speed: 0, color: [5, 2, 1.6], size: 0.4, life: 0.06, grav: 0 });
+      }
       if (killed) this.onKill(hitBot, head);
       else { if (head) { sfx.headshot(); UI.hitmarker('hs'); } else { sfx.hit(); UI.hitmarker(''); } }
     } else if (wall) {
       this.decals.add(end, wall.normal);
-      const n = _v2.set(wall.normal[0], wall.normal[1], wall.normal[2]);
-      this.ps.burst(end, 8, { speed: 5, color: [5, 3.4, 1.2], size: 0.045, life: 0.25, grav: 14, dir: n, spread: 0.8 });
-      this.ps.burst(end, 4, { speed: 1.2, color: [0.5, 0.45, 0.4], size: 0.18, life: 0.6, grav: -0.5, dir: n, spread: 0.6, drag: 3 });
+      const n = _v.set(wall.normal[0], wall.normal[1], wall.normal[2]);
+      // ricochet sparks fan out around the reflected ray, dust puffs off the surface
+      const refl = dir.clone().addScaledVector(n, -2 * dir.dot(n)).add(n).normalize();
+      this.ps.sparkBurst(end, 9, { speed: 7.5, color: ult ? [[6, 4.4, 1.2], [6, 5.4, 2.6]] : [[5, 3.4, 1.2], [5, 2.2, 0.7]], width: 0.011, life: 0.28, dir: refl, spread: 0.75, grav: 16 });
+      this.ps.burst(end, 1, { speed: 0, color: [5, 3.4, 1.5], size: 0.3, life: 0.05, grav: 0 });
+      this.ps.puff(end, 3, { dir: n, speed: 1.5, spread: 0.6, size: 0.26, life: 0.85, color: [0.78, 0.7, 0.6], alpha: 0.5 });
     }
     // tracer + flash + light
     const m = this.vm.muzzleCam(new THREE.Vector3());
     m.multiplyScalar(1.6).applyQuaternion(cam.quaternion).add(cam.position);
-    if (Math.random() < 0.7) this.tracers.fire(m, end);
-    this.vm.fire(); sfx.shot(p.ultT > 0);
-    if (this.quality === 'high') { this.muzzleLight.position.copy(cam.position).addScaledVector(dir, 1.2); this.muzzleLight.intensity = 6; }
+    if (ult) this.tracers.fire(m, end, [6, 4.6, 1.3], 0.03, 0.12);
+    else if (i % 3 !== 1) this.tracers.fire(m, end, [6, 4.2, 1.8], 0.018, 0.06);
+    this.vm.fire(ult); sfx.shot(ult);
+    if (this.quality === 'high') { this.muzzleLight.position.copy(cam.position).addScaledVector(dir, 1.2); this.muzzleLight.intensity = 7; this.muzzleLight.color.set(ult ? 0xffd36a : 0xffc27a); }
     UI.$('cross').classList.add('spread'); clearTimeout(this.crossT); this.crossT = setTimeout(() => UI.$('cross').classList.remove('spread'), 120);
     if (p.ammo === 0) setTimeout(() => this.reload(), 150);
     // gunfire alerts nearby bots
@@ -547,11 +561,16 @@ export class Game {
   onKill(bot, head) {
     const p = this.player; p.kills++;
     UI.feed(PLAYER_NAME, bot.name, { hs: head });
-    UI.hitmarker('kill'); sfx.kill(p.kills); if (head) sfx.headshot();
+    UI.hitmarker(head ? 'kill hs' : 'kill'); sfx.kill(p.kills); if (head) sfx.headshot();
     const idx = this.botIndex(bot); if (idx >= 0) UI.markBotDead(idx);
     const before = p.ult; p.ult = Math.min(ULT_COST, p.ult + 1);
     if (before < ULT_COST && p.ult === ULT_COST) { sfx.ultReady(); UI.toast('MAIN CHARACTER READY', 'PRESS X', 1600); }
-    this.ps.burst(bot.head(), 24, { speed: 5, color: [[5, 1, 1.3], [5, 4, 1.2]], size: 0.08, life: 0.5, grav: 4 });
+    // the bot "shorts out": a pop of sparks from the chest, gold ones from the head on a headshot
+    const chest = new THREE.Vector3(bot.pos.x, bot.pos.y + 1.25, bot.pos.z);
+    this.ps.burst(bot.head(), 18, { speed: 4, color: [[5, 1, 1.3], [5, 4, 1.2]], size: 0.08, life: 0.5, grav: 4 });
+    this.ps.sparkBurst(chest, 26, { speed: 8, color: [[5, 0.9, 1.2], [5, 2.6, 1]], width: 0.014, life: 0.45, grav: 12, dir: new THREE.Vector3(0, 0.6, 0), spread: 1.2 });
+    if (head) this.ps.sparkBurst(bot.head(), 36, { speed: 11, color: [[6, 4.4, 1.1], [6, 5.4, 2.6]], width: 0.018, life: 0.55, grav: 8, dir: new THREE.Vector3(0, 0.5, 0), spread: 1.3 });
+    this.ps.puff(chest, 4, { size: 0.4, life: 1.0, speed: 0.8, color: [0.3, 0.3, 0.33], alpha: 0.45, grav: -0.8 });
   }
   botIndex(bot) { return bot.teamIdx ?? this.bots.indexOf(bot); }
   botFire(bot, target, dist) {
@@ -563,7 +582,9 @@ export class Game {
     const speed = 19 + Math.min(3, this.roundIdx) * 1.5;
     const dmg = 6 + Math.min(3, this.roundIdx);
     this.proj.spawn(from, dir, speed, dmg, bot);
+    bot.onFire?.();
     this.ps.burst(from, 6, { speed: 2, color: [5, 0.8, 1], size: 0.08, life: 0.2, grav: 0 });
+    this.ps.sparkBurst(from, 6, { speed: 5, color: [5, 1, 1.3], width: 0.01, life: 0.15, dir, spread: 0.5, grav: 0 });
     sfx.botShot(dist);
   }
   playerHit(dmg, owner) {
@@ -571,7 +592,7 @@ export class Game {
     p.tookDamage = true; p.lastHurt = this.t;
     let d = dmg; const hadShield = p.shield > 0;
     if (p.shield > 0) { const s = Math.min(p.shield, d); p.shield -= s; d -= s; if (hadShield && p.shield <= 0) sfx.shieldBreak(); }
-    p.hp -= d; sfx.hurt();
+    p.hp -= d; sfx.hurt(); this.vm.hurt?.();
     this.post.grade.uniforms.uHurt.value = Math.min(0.7, this.post.grade.uniforms.uHurt.value + 0.35);
     const hf = UI.$('hurtfx'); hf.classList.add('on'); setTimeout(() => hf.classList.remove('on'), 90);
     if (owner) {
@@ -593,27 +614,74 @@ export class Game {
     if (len < 0.1) { wx = -Math.sin(p.yaw); wz = -Math.cos(p.yaw); }
     const L = Math.hypot(wx, wz); p.dashDir.set(wx / L, 0, wz / L);
     p.dashT = 0.2; p.cdQ = DASH_CD; sfx.dash(); UI.pulse('abQ');
-    // burst of colour at the start
-    const cols = [[5, 1.2, 1.5], [5, 3.6, 0.5], [0.8, 3.6, 3.2], [4.6, 1, 4]];
-    this.ps.burst(new THREE.Vector3(p.pos.x, p.pos.y + 1, p.pos.z), 50, { speed: 5, color: cols, size: 0.12, life: 0.8, grav: -0.5, drag: 2 });
+    const cols = [[5, 1.2, 1.5], [5, 3.6, 0.5], [0.8, 3.6, 3.2], [4.6, 1, 4], [4.6, 4.4, 4]];
+    // burst of colour where the dash starts (kept low and behind so it doesn't white-out the view)
+    const at = new THREE.Vector3(p.pos.x - p.dashDir.x * 0.8, p.pos.y + 0.6, p.pos.z - p.dashDir.z * 0.8);
+    const soft = cols.map((c) => c.map((v) => v * 0.6));
+    this.ps.burst(at, 30, { speed: 4, color: soft, size: 0.09, life: 0.8, grav: -0.5, drag: 2 });
+    this.ps.sparkBurst(at, 26, { speed: 8, color: soft, width: 0.018, life: 0.5, grav: 0, drag: 3, stretch: 0.06 });
+    // Garba ribbons: swirling colour streamers left along the dash path, plus mirror-work glints
+    const d = p.dashDir.clone(), side = new THREE.Vector3(-d.z, 0, d.x);
+    let k = 0;
+    this.ps.addEmitter((dt, t) => {
+      if (t > 0.32) return;
+      const n = Math.max(2, Math.round(dt * 160));
+      for (let i = 0; i < n; i++) {
+        k++; const c = soft[k % soft.length]; const a = k * 0.9 + t * 30;
+        const r = 0.55 + 0.25 * Math.sin(k * 1.7);
+        const ox = side.x * Math.cos(a) * r, oz = side.z * Math.cos(a) * r, oy = 1.0 + Math.sin(a) * r;
+        this.ps.sparks.emit(p.pos.x + ox - d.x * 0.6, p.pos.y + oy, p.pos.z + oz - d.z * 0.6,
+          -d.x * 3 + side.x * Math.cos(a) * 1.5, Math.sin(a) * 1.5 + 0.4, -d.z * 3 + side.z * Math.cos(a) * 1.5,
+          c[0], c[1], c[2], 0.035, 0.75, 0, 2.2, 0.12);
+        if (i % 4 === 0) this.ps.emit(p.pos.x + ox * 1.6 - d.x, p.pos.y + oy * 0.8, p.pos.z + oz * 1.6 - d.z, (Math.random() - 0.5), Math.random() * 0.8, (Math.random() - 0.5), 3, 3, 2.8, 0.05, 0.6, -0.3, 1.5);
+      }
+    }, 0.4);
+    this.vm.dash?.(cols);
   }
   useUpdraft() {
     const p = this.player; if (p.cdE > 0) return;
     p.vel.y = 14.6; p.onGround = false; p.cdE = UP_CD; p.updraftT = 0.7; sfx.updraft(); UI.pulse('abE');
-    for (let i = 0; i < 60; i++) { const a = (i / 60) * PI * 2; this.ps.emit(p.pos.x + Math.cos(a) * 0.6, p.pos.y + 0.1, p.pos.z + Math.sin(a) * 0.6, Math.cos(a) * 7, 0.6, Math.sin(a) * 7, 2.6, 3.4, 3.6, 0.16, 0.6, 0, 3); }
+    for (let i = 0; i < 48; i++) { const a = (i / 48) * PI * 2; this.ps.emit(p.pos.x + Math.cos(a) * 0.6, p.pos.y + 0.1, p.pos.z + Math.sin(a) * 0.6, Math.cos(a) * 7, 0.6, Math.sin(a) * 7, 2.6, 3.4, 3.6, 0.16, 0.6, 0, 3); }
+    // ground shockwave + dust kicked up by the gust
+    const g = new THREE.Vector3(p.pos.x, p.pos.y + 0.15, p.pos.z);
+    for (let i = 0; i < 36; i++) { const a = (i / 36) * PI * 2; this.ps.sparks.emit(g.x + Math.cos(a) * 0.5, g.y, g.z + Math.sin(a) * 0.5, Math.cos(a) * 9, 0.8, Math.sin(a) * 9, 2.2, 3.4, 3.6, 0.03, 0.45, 0, 4, 0.06); }
+    this.ps.puff(g, 10, { speed: 4, size: 0.5, life: 1.1, color: [0.85, 0.78, 0.7], alpha: 0.45, dir: new THREE.Vector3(0, 0.25, 0), spread: 1 });
+    this.vm.updraft?.();
   }
-  windSwirl() {
+  windSwirl(dt = 0.016) {
+    // spiral wind lines that rise with the player (so they stay in view in first person)
     const p = this.player; const t = this.t;
-    for (let i = 0; i < 5; i++) {
-      const a = t * 14 + i * 1.26; const r = 0.9 + Math.random() * 0.3;
-      this.ps.emit(p.pos.x + Math.cos(a) * r, p.pos.y - 0.4 + Math.random() * 1.2, p.pos.z + Math.sin(a) * r, -Math.sin(a) * 4, 3 + Math.random() * 3, Math.cos(a) * 4, 2.4, 3.2, 3.4, 0.09, 0.5, 0, 1);
+    const n = Math.max(2, Math.round(dt * 200));
+    for (let i = 0; i < n; i++) {
+      const a = t * 13 + (i / n) * PI * 2 + Math.random() * 0.4; const r = 0.85 + Math.random() * 0.5;
+      const y = p.pos.y - 0.2 + Math.random() * 2.2;
+      const w = Math.random() < 0.25;
+      this.ps.sparks.emit(p.pos.x + Math.cos(a) * r, y, p.pos.z + Math.sin(a) * r,
+        -Math.sin(a) * 6.5 + p.vel.x * 0.8, p.vel.y * 0.75 + 1.5, Math.cos(a) * 6.5 + p.vel.z * 0.8,
+        w ? 2.2 : 1.0, w ? 2.3 : 1.9, w ? 2.1 : 2.0, w ? 0.018 : 0.012, 0.45, 0, 1.2, 0.07);
     }
+    if (Math.random() < 0.5) this.ps.emit(p.pos.x + (Math.random() - 0.5) * 2, p.pos.y + Math.random() * 2, p.pos.z + (Math.random() - 0.5) * 2, 0, p.vel.y * 0.6, 0, 2.6, 3.6, 3.6, 0.08, 0.5, 0, 1);
   }
   useUlt() {
     const p = this.player; if (p.ult < ULT_COST || p.ultT > 0) return;
     p.ult = 0; p.ultT = ULT_TIME; this.timeScale = 0.4; sfx.ult(); UI.pulse('abX');
     UI.banner('ULTIMATE', 'MAIN CHARACTER', 'EVERYTHING ELSE IS A SIDE QUEST', 'round', 1800);
     UI.flash();
+    // golden shockwave, a pillar of light and a shower of glitter
+    const gold = [[6, 4.4, 1.2], [6, 5.2, 2.4], [5, 3.2, 0.7]];
+    const g = new THREE.Vector3(p.pos.x, p.pos.y + 0.2, p.pos.z);
+    for (let i = 0; i < 72; i++) { const a = (i / 72) * PI * 2; const c = gold[i % 3]; this.ps.sparks.emit(g.x + Math.cos(a) * 0.6, g.y, g.z + Math.sin(a) * 0.6, Math.cos(a) * 14, 0.5, Math.sin(a) * 14, c[0], c[1], c[2], 0.04, 0.7, 0, 2.2, 0.05); }
+    for (let i = 0; i < 48; i++) { const a = (i / 48) * PI * 2, r = 1.6 + Math.random() * 0.6; const c = gold[i % 3]; this.ps.sparks.emit(g.x + Math.cos(a) * r, g.y, g.z + Math.sin(a) * r, 0, 7 + Math.random() * 7, 0, c[0] * 0.7, c[1] * 0.7, c[2] * 0.7, 0.025, 0.9, 6, 1, 0.05); }
+    for (let i = 0; i < 40; i++) { const a = Math.random() * PI * 2, r = 1.8 + Math.random() * 1.5; const c = gold[i % 3]; this.ps.emit(g.x + Math.cos(a) * r, g.y + Math.random() * 2.5, g.z + Math.sin(a) * r, Math.cos(a) * 1.5, 1 + Math.random() * 2, Math.sin(a) * 1.5, c[0] * 0.7, c[1] * 0.7, c[2] * 0.7, 0.08, 1.2, 1, 1.5); }
+    this.ps.addEmitter((dt) => {
+      if (p.ultT <= 0 || !p.alive) return false;
+      const n = Math.random() < dt * 40 ? 2 : 0;
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * PI * 2, r = 1.2 + Math.random() * 2.2; const c = gold[(Math.random() * 3) | 0];
+        this.ps.emit(p.pos.x + Math.cos(a) * r, p.pos.y + Math.random() * 2.4, p.pos.z + Math.sin(a) * r, 0, 0.6 + Math.random(), 0, c[0], c[1], c[2], 0.06, 1.2, -0.2, 0.5);
+      }
+    }, 999);
+    this.vm.ult?.(ULT_TIME);
   }
   rescueCat() {
     const p = this.player; p.catRescued = true;
