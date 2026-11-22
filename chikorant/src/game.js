@@ -80,31 +80,42 @@ export class Game {
 
   // ── setup ────────────────────────────────────────────────────────────────
   buildSky() {
-    const sunDir = new THREE.Vector3(-0.55, 0.32, 0.77).normalize(); this.sunDir = sunDir;
+    // low golden-hour sun in the south-west: side light + long shadows across the lanes
+    const sunDir = new THREE.Vector3(-0.64, 0.45, 0.62).normalize(); this.sunDir = sunDir;
+    this.scene.fog = new THREE.Fog(0xf2c8a0, 55, 240); // warm haze that swallows the far skyline
     const mat = new THREE.ShaderMaterial({
       uniforms: { uSun: { value: sunDir } }, side: THREE.BackSide, depthWrite: false, fog: false,
       vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); gl_Position.z = gl_Position.w; }',
       fragmentShader: `uniform vec3 uSun; varying vec3 vD;
-        void main(){ float h = vD.y;
-          vec3 top = vec3(0.16,0.38,0.62), mid = vec3(0.47,0.68,0.84), hor = vec3(1.0,0.80,0.62), low = vec3(0.95,0.62,0.48);
-          vec3 c = mix(hor, mid, smoothstep(0.0, 0.22, h)); c = mix(c, top, smoothstep(0.22, 0.75, h)); c = mix(c, low, smoothstep(0.0,-0.2,h));
-          float s = max(0.0, dot(normalize(vD), uSun));
-          c += vec3(1.0,0.62,0.32) * pow(s, 6.0) * 0.45 + vec3(1.0,0.85,0.6) * pow(s, 60.0) * 0.8;
-          c += vec3(1.6,1.4,1.1) * smoothstep(0.9993, 0.9996, s);
+        void main(){ vec3 d = normalize(vD); float h = d.y;
+          float s = max(0.0, dot(d, uSun));
+          vec3 top = vec3(0.13,0.33,0.62), mid = vec3(0.42,0.64,0.85), hor = vec3(1.0,0.78,0.58), low = vec3(0.93,0.60,0.47);
+          // horizon warms up toward the sun, cools away from it
+          hor = mix(vec3(0.86,0.80,0.80), hor, 0.45 + 0.55 * pow(s, 1.5));
+          vec3 c = mix(hor, mid, smoothstep(0.0, 0.25, h)); c = mix(c, top, smoothstep(0.25, 0.8, h)); c = mix(c, low, smoothstep(0.0,-0.2,h));
+          c += vec3(1.0,0.55,0.25) * pow(s, 6.0) * 0.32 + vec3(1.0,0.82,0.55) * pow(s, 60.0) * 0.55;
+          c += vec3(1.7,1.45,1.1) * smoothstep(0.9993, 0.9996, s);
+          // faint painted streaks of high cloud
+          float band = sin(d.x * 9.0 + d.z * 5.0 + sin(d.z * 13.0) * 0.6) * 0.5 + 0.5;
+          c = mix(c, vec3(1.0, 0.86, 0.76), smoothstep(0.75, 1.0, band) * smoothstep(0.05, 0.25, h) * (1.0 - smoothstep(0.35, 0.6, h)) * 0.18);
           gl_FragColor = vec4(c, 1.0); }`,
     });
     const sky = new THREE.Mesh(new THREE.SphereGeometry(450, 32, 16), mat); sky.frustumCulled = false; sky.renderOrder = -1;
     this.scene.add(sky); this.sky = sky;
   }
   buildLights() {
-    const hemi = new THREE.HemisphereLight(0xbcdaf2, 0xe7b48a, 1.35); this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffd3a2, 2.7);
+    // cool sky / warm bounce so shadowed sides read blue-violet and lit sides glow amber
+    const hemi = new THREE.HemisphereLight(0x9cbbe6, 0xd49a6c, 1.05); this.scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xffc58c, 3.4);
     sun.position.copy(this.sunDir).multiplyScalar(120); sun.target.position.set(0, 0, 0);
     sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-    const sc = sun.shadow.camera; sc.left = -62; sc.right = 62; sc.top = 52; sc.bottom = -52; sc.near = 20; sc.far = 260;
-    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05; sun.shadow.radius = 3;
+    const sc = sun.shadow.camera; sc.left = -66; sc.right = 66; sc.top = 60; sc.bottom = -60; sc.near = 20; sc.far = 260;
+    sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05; sun.shadow.radius = 4;
     this.scene.add(sun, sun.target); this.sun = sun;
-    const fill = new THREE.DirectionalLight(0xffc9a8, 0.5); fill.position.set(40, 30, -30); this.scene.add(fill);
+    // soft lavender skylight from the opposite side keeps shade colourful instead of grey
+    const fill = new THREE.DirectionalLight(0xa9a6ff, 0.45); fill.position.set(60, 40, -45); this.scene.add(fill);
+    // warm bounce from the west (setting-sun glow off the walls)
+    const rim = new THREE.DirectionalLight(0xffa36b, 0.3); rim.position.set(-70, 10, -30); this.scene.add(rim);
     this.muzzleLight = new THREE.PointLight(0xffc27a, 0, 9, 2); this.scene.add(this.muzzleLight);
     this.cakeLight = new THREE.PointLight(0xffb24a, 0, 7, 2); this.scene.add(this.cakeLight);
   }
