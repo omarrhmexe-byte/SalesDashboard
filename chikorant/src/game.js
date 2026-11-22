@@ -365,7 +365,8 @@ export class Game {
     if (p.dashT > 0) {
       p.dashT -= dt; p.vel.x = p.dashDir.x * 34; p.vel.z = p.dashDir.z * 34; p.vel.y = Math.max(p.vel.y, 0);
       const cols = [[5, 1.2, 1.5], [5, 3.6, 0.5], [0.8, 3.6, 3.2], [4.6, 1, 4], [4.6, 4.4, 4]];
-      for (let i = 0; i < 6; i++) { const c = cols[(Math.random() * cols.length) | 0]; this.ps.emit(p.pos.x + (Math.random() - 0.5) * 0.9, p.pos.y + 0.3 + Math.random() * 1.3, p.pos.z + (Math.random() - 0.5) * 0.9, (Math.random() - 0.5) * 2, Math.random() * 1.5, (Math.random() - 0.5) * 2, c[0], c[1], c[2], 0.11, 0.7, -1, 1.5); }
+      // trail left behind the player (kept low and off-axis so it never blobs over the camera)
+      for (let i = 0; i < 3; i++) { const c = cols[(Math.random() * cols.length) | 0]; const back = 1.2 + Math.random() * 0.8, side = (Math.random() - 0.5) * 1.6; this.ps.emit(p.pos.x - p.dashDir.x * back - p.dashDir.z * side, p.pos.y + 0.2 + Math.random() * 0.9, p.pos.z - p.dashDir.z * back + p.dashDir.x * side, (Math.random() - 0.5) * 2, Math.random() * 1.5, (Math.random() - 0.5) * 2, c[0] * 0.7, c[1] * 0.7, c[2] * 0.7, 0.06, 0.6, -1, 1.5); }
       // streaks that fly past the camera so the trail reads in first person
       const sx = -p.dashDir.z, sz = p.dashDir.x;
       for (let i = 0; i < 8; i++) {

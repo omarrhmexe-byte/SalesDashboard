@@ -58,7 +58,7 @@ button { font: inherit; color: inherit; }
 .hitm i { position: absolute; width: 10px; height: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
 .hitm i:nth-child(1) { transform: translate(-16px,-12px) rotate(45deg); } .hitm i:nth-child(2) { transform: translate(6px,-12px) rotate(-45deg); }
 .hitm i:nth-child(3) { transform: translate(-16px,10px) rotate(-45deg); } .hitm i:nth-child(4) { transform: translate(6px,10px) rotate(45deg); }
-.hitm.on { animation: hm .22s ease-out; } .hitm.hs i { background: var(--gold); } .hitm.kill i { background: var(--red); width: 14px; }
+.hitm.on { animation: hm .22s ease-out; } .hitm.hs i { background: var(--gold); } .hitm.kill i { background: var(--red); width: 14px; } .hitm.kill.hs i { background: var(--gold); width: 16px; }
 @keyframes hm { 0% { opacity: 1; transform: scale(1.4); } 100% { opacity: 0; transform: scale(1); } }
 .dmgdirs .dd { position: absolute; left: 50%; top: 50%; width: 220px; height: 220px; margin: -110px 0 0 -110px; pointer-events: none; animation: ddf 1.1s forwards; }
 .dmgdirs .dd::before { content: ''; position: absolute; left: 50%; top: 0; width: 90px; height: 14px; margin-left: -45px; background: radial-gradient(ellipse at 50% 100%, rgba(255,70,85,.95), rgba(255,70,85,0) 70%); border-top: 3px solid var(--red); border-radius: 50% 50% 0 0; }
