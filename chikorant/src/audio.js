@@ -102,7 +102,7 @@ function tone(t, dur, { type = 'sine', freq = 440, f2 = null, gain = 0.3, a = 0.
 function bell(t, f, gain = 0.15, dec = 0.6, out = sfxBus) {
   tone(t, dec, { freq: f, gain, dec, out });
   tone(t, dec * 0.6, { freq: f * 2.76, gain: gain * 0.35, dec: dec * 0.5, out });
-  tone(t, dec * 0.3, { freq: f * 5.4, gain: gain * 0.15, dec: dec * 0.25, out });
+  if (f * 5.4 < 20000) tone(t, dec * 0.3, { freq: f * 5.4, gain: gain * 0.15, dec: dec * 0.25, out }); // skip partials above Nyquist
 }
 // dhol / tabla voices (shared by dash, boom flourish, lobby)
 function dholLow(t, g = 0.5, out = sfxBus) {

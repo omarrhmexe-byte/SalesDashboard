@@ -29,10 +29,10 @@ const BONUS_POSTS = ['aCrate', 'aSite', 'mid', 'backHall2', 'bSite', 'bBoard', '
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _q = new THREE.Quaternion();
 
 export class Game {
-  constructor({ canvas, mobile, quality }) {
+  constructor({ canvas, mobile, quality, forceQuality = false }) {
     this.canvas = canvas; this.mobile = mobile; this.quality = quality;
     this.settings = loadSettings(mobile);
-    if (this.settings.quality) this.quality = this.settings.quality;
+    if (this.settings.quality && !forceQuality) this.quality = this.settings.quality; // ?q= in the URL wins over the saved choice
     setVolume(this.settings.volume);
 
     // renderer
@@ -215,6 +215,7 @@ export class Game {
     this.bots = names.map((n, k) => {
       const pp = this.map.posts[posts[k % posts.length]];
       const b = new Bot(this.scene, n, pp[0] + (k >= posts.length ? 1.5 : 0), pp[1], { yaw: -PI / 2 + (Math.random() - 0.5) * 0.6, difficulty: Math.min(3, i), hp: 100 });
+      b.teamIdx = k; // fixed HUD icon slot (indexOf breaks once dead bots are removed from the list)
       return b;
     });
     UI.teamIcons(this.bots.map((b) => b.name));
@@ -222,10 +223,10 @@ export class Game {
     this.cake.visible = false; d.plantRing.visible = !!R.final; d.plantBeacon.visible = !!R.final; this.plantLabel.visible = !!R.final;
     this.roundTime = R.final ? PLANT_PHASE_TIME : ROUND_TIME;
     this.liveT = 0; this.buyT = 0; this.countdownN = 4; this.state = 'buy'; this.timeScale = 1; this.slowT = 0;
-    this.vm.equip = 1;
+    this.vm.equip = 1; this.vm.reloadT = 0; this.vm.ultT = 0; // a restart mid-reload / mid-ult must not carry the gun animation over
     UI.$('rdlabel').textContent = R.final ? 'FINAL ROUND' : `ROUND ${i + 1}`;
     UI.banner(R.final ? 'FINAL ROUND' : `ROUND ${i + 1}`, R.title.toUpperCase(), R.final ? 'CARRY THE CAKE TO A SITE' : '', 'round', 2100);
-    UI.$('objective').textContent = R.final ? 'BRING THE CAKE TO A SITE (THE PANTRY) · HOLD F TO PLANT' : 'ELIMINATE ALL DEADLINES';
+    UI.$('objective').textContent = R.final ? `BRING THE CAKE TO A SITE (THE PANTRY) · HOLD ${this.mobile ? 'PLANT' : 'F'} TO PLANT` : 'ELIMINATE ALL DEADLINES';
     UI.show('cakechip', !!R.final); UI.show('tF', false);
     sfx.roundStart();
     this.hudCache = {};
@@ -429,7 +430,7 @@ export class Game {
       const inZone = this.inPlantZone();
       UI.show('tF', inZone && this.mobile);
       if (inZone && this.state === 'live') {
-        UI.tip(this.mobile ? 'HOLD PLANT TO PLANT THE CAKE' : 'HOLD  F  TO PLANT THE CAKE');
+        UI.tip(this.mobile ? '' : 'HOLD  F  TO PLANT THE CAKE'); // phones: the PLANT button sits where the tip would (it overlapped)
         if (planting) {
           if (p.plantT === 0) sfx.plantTick();
           p.plantT += dt; UI.show('plantbar'); UI.$('plantFill').style.width = `${Math.min(100, (p.plantT / FINAL_ROUND.plantSeconds) * 100)}%`;
@@ -464,7 +465,7 @@ export class Game {
     const p = this.player; const cam = this.camera;
     p.camY += (EYE - p.camY) * Math.min(1, dt * 14);
     const stepDiff = p.pos.y + EYE - (this.lastCamY ?? p.pos.y + EYE);
-    if (p.onGround && stepDiff > 0 && stepDiff < 0.5) p.camY -= stepDiff * 0.8; // smooth step-ups
+    if (p.onGround && stepDiff > 0 && stepDiff < 0.6) p.camY -= stepDiff * 0.8; // smooth step-ups
     this.lastCamY = p.pos.y + EYE;
     if (p.alive) {
       cam.position.set(p.pos.x, p.pos.y + p.camY, p.pos.z);

@@ -6,7 +6,7 @@ export function addSolid(x0, y0, z0, x1, y1, z1, tag = null) {
   solids.push(s); return s;
 }
 
-const STEP = 0.45;
+const STEP = 0.55; // max climbable rise (the B-stage steps are 0.5 each)
 
 // Moves `pos` (feet position, THREE.Vector3) by vel*dt with collision. Returns { onGround, hitCeil, landedSpeed }.
 export function moveBody(pos, vel, dt, radius, height, wasOnGround) {

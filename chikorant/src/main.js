@@ -9,7 +9,7 @@ const params = new URLSearchParams(location.search);
 async function boot() {
   // canvas textures need the display font loaded first (don't wait forever)
   try { await Promise.race([Promise.all([document.fonts.load('80px "Bebas Neue"'), document.fonts.load('80px "Anton"'), document.fonts.load('700 20px Inter')]), new Promise((r) => setTimeout(r, 2500))]); } catch (e) { /* fallback fonts */ }
-  const game = new Game({ canvas: document.getElementById('c'), mobile, quality: params.get('q') || (mobile ? 'low' : 'high') });
+  const game = new Game({ canvas: document.getElementById('c'), mobile, quality: params.get('q') || (mobile ? 'low' : 'high'), forceQuality: params.has('q') });
   if (params.has('debug')) { window.G = game; game.noAutoPause = true; }
   UI.buildSelect(mobile);
   const splash = UI.$('splash'); splash.classList.add('ready');

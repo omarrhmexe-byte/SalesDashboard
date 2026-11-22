@@ -145,7 +145,8 @@ function buildModel(uni, hdrVisor = 4) {
   mg.position.set(0.5, 0.01, 0); mg.scale.setScalar(0.001); gun.add(mg); P.muzzleGlow = mg;
   const groups = []; rig.traverse((o) => { if (o.isGroup || o === rig) groups.push(o); });
   groups.forEach(mergeChildren);
-  rig.traverse((o) => { if (o.isMesh && !o.userData.noOutline) o.castShadow = true; });
+  // shadows: skip tiny parts (gloves, knee caps) whose shadow is a couple of texels anyway
+  rig.traverse((o) => { if (o.isMesh && !o.userData.noOutline) { if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); o.castShadow = o.geometry.boundingSphere.radius * Math.max(o.scale.x, o.scale.y, o.scale.z) >= 0.1; } });
   return { root, rig, P, mats: { armor, plate, red, dark, visor, glass } };
 }
 
@@ -162,7 +163,8 @@ export class Bot {
     this.outline = outlineMaterial(0.02); addOutlines(this.rig, this.outline);
     const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: nameTagTexture(name), depthTest: true, transparent: true }));
     tag.scale.set(1.8, 0.34, 1); tag.position.y = 2.28; this.root.add(tag); this.tag = tag;
-    this.pos = new THREE.Vector3(x, 0, z); this.vel = new THREE.Vector3(); this.onGround = true;
+    // stand on raised posts (A platform, B stage) instead of spawning inside them
+    this.pos = new THREE.Vector3(x, groundHeight(x, z, 0.42, 1.5), z); this.vel = new THREE.Vector3(); this.onGround = true;
     this.anchor = new THREE.Vector3(x, 0, z);
     this.yaw = opts.yaw ?? PI / 2; this.root.position.copy(this.pos);
     this.hp = opts.hp ?? 100; this.alive = true; this.dying = 0;
@@ -180,7 +182,14 @@ export class Bot {
   }
   get eye() { return _w.set(this.pos.x, this.pos.y + 1.6, this.pos.z); }
   head() { return new THREE.Vector3(this.pos.x, this.pos.y + 1.66, this.pos.z); }
-  dispose() { this.scene.remove(this.root); }
+  dispose() {
+    this.scene.remove(this.root);
+    // free per-bot GPU buffers (merged geometry, name tag texture); shared geometry and the
+    // materials (whose compiled programs are shared by every bot) are kept
+    const shared = new Set(Object.values(geos()));
+    this.root.traverse((o) => { if (o.geometry && !shared.has(o.geometry)) o.geometry.dispose(); });
+    this.tag.material.map?.dispose();
+  }
 
   // dir (optional THREE.Vector3): direction the shot travelled, for the flinch / fall direction.
   damage(n, fromDir, headshot, dir = null) {
@@ -206,6 +215,8 @@ export class Bot {
 
   update(dt, G) {
     const p = this.pos;
+    // draw-call LOD: the 2cm ink outline is sub-pixel beyond ~22m, so skip its ~24 draws per bot
+    if (this.alive) { const c = G.camera.position; this.outline.visible = (c.x - p.x) ** 2 + (c.z - p.z) ** 2 < 22 * 22; }
     if (!this.alive) { this.updateDeath(dt, G); return; }
     if (this.frozen) { this.pose(dt, 0, 0); return; }
     const player = G.player;
@@ -399,11 +410,15 @@ export class Bot {
         this.path = G.nav.path(p, goal);
         // skip waypoints we've already passed: if the next one is directly reachable, drop the first
         while (this.path.length > 1 && widthClear(eyeA, _v.set(this.path[1].x, p.y + 1.0, this.path[1].z))) this.path.shift();
+        // already walking the leg A→B? don't turn back to A just because it is still the nearest node
+        // (that made bots shuttle forever between a node and the next doorway)
+        const lg = this.leg;
+        if (lg && this.path.length > 1 && this.path[0].distanceToSquared(lg[0]) < 0.01 && this.path[1].distanceToSquared(lg[1]) < 0.01) this.path.shift();
       }
     }
     let tgt = this.path.length ? this.path[0] : goal;
     _w.set(tgt.x - p.x, 0, tgt.z - p.z);
-    if (this.path.length && _w.length() < 1.2) { this.path.shift(); tgt = this.path.length ? this.path[0] : goal; _w.set(tgt.x - p.x, 0, tgt.z - p.z); }
+    if (this.path.length && _w.length() < 1.2) { const reached = this.path.shift(); tgt = this.path.length ? this.path[0] : goal; this.leg = this.path.length ? [reached, tgt.clone()] : null; _w.set(tgt.x - p.x, 0, tgt.z - p.z); }
     const L = _w.length(); if (L < 0.8 && !this.path.length) return new THREE.Vector3();
     return _w.clone().divideScalar(L || 1);
   }
@@ -448,6 +463,7 @@ export class Bot {
     this.muzzleT = Math.max(0, this.muzzleT - dt * 7);
     const g = Math.max(this.charge * this.charge * 0.32, this.muzzleT * 0.75);
     P.muzzleGlow.scale.setScalar(Math.max(0.001, g * (1 + Math.sin(t * 40) * 0.08)));
+    P.muzzleGlow.visible = g > 0.002; // don't spend a draw call on an invisible sprite
     P.muzzleGlow.material.opacity = Math.min(1, 0.5 + g * 2);
     this.mats.visor.emissiveIntensity = 4 + this.charge * 2.5 + this.muzzleT * 3;
     P.clockHand.rotation.z = -t * 2;

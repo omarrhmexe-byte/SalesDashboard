@@ -41,7 +41,9 @@ function std(color, mapName, { rough = 0.92, metal = 0, emissive = null, ei = 1,
 function glow(r, g, b) { return new THREE.MeshBasicMaterial({ color: new THREE.Color(r, g, b), toneMapped: true }); }
 
 export function buildMap(scene, { quality }) {
-  const hi = quality === 'high';
+  // shadow flags cost nothing while the renderer's shadow map is off (LOW), so always set them:
+  // switching LOW → HIGH at runtime then gets full map shadows instead of none
+  const hi = true; void quality;
   const M = {
     stucco: std(0xffffff, 'stucco', { paint: 1 }),
     plaster: std(0xffffff, 'plaster', { paint: 0.7 }),
@@ -1006,7 +1008,7 @@ export function buildMap(scene, { quality }) {
     BL: [35, 12], BLc: [33, 4], BL2: [33, -4], BMAIN: [31, -11], BSITE: [30, -22], BB: [14, -18], CEa: [24, 4], CEb: [11, 4],
   };
   const edges = [
-    ['S0', 'P0'], ['P0', 'PW'], ['P0', 'PE'], ['P0', 'MS'], ['PW', 'AL'], ['AL', 'ALc'], ['ALc', 'AL2'], ['AL2', 'AMAIN'], ['AMAIN', 'AM2'], ['AM2', 'ASITE'], ['ASITE', 'APLANT'], ['AM2', 'AB'], ['AMAIN', 'APLANT'],
+    ['S0', 'P0'], ['P0', 'PW'], ['P0', 'PE'], ['P0', 'MS'], ['PW', 'AL'], ['AL', 'ALc'], ['ALc', 'AL2'], ['AL2', 'AMAIN'], ['AMAIN', 'AM2'], ['AM2', 'ASITE'], ['ASITE', 'APLANT'], ['AM2', 'AB'], // (no AMAIN→APLANT edge: that straight leg runs into the island counter)
     ['AB', 'BH'], ['BH', 'MN'], ['MN', 'MWc'], ['MN', 'MEc'], ['MWc', 'MS'], ['MEc', 'MS'], ['MWc', 'CWb'], ['CWb', 'CWa'], ['CWa', 'ALc'],
     ['PE', 'BL'], ['BL', 'BLc'], ['BLc', 'BL2'], ['BL2', 'BMAIN'], ['BMAIN', 'BSITE'], ['BSITE', 'BB'], ['BB', 'BH'], ['MEc', 'CEb'], ['CEb', 'CEa'], ['CEa', 'BLc'],
   ];
