@@ -9,7 +9,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uGold: { value: 0 }, uVig: { value: 0.55 }, uHurt: { value: 0 }, uTime: { value: 0 }, uFlash: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, uGold: { value: 0 }, uVig: { value: 0.42 }, uHurt: { value: 0 }, uTime: { value: 0 }, uFlash: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
   fragmentShader: `uniform sampler2D tDiffuse; uniform float uGold, uVig, uHurt, uTime, uFlash; varying vec2 vUv;
     void main(){
@@ -17,6 +17,12 @@ const GradeShader = {
       float ca = uGold * 0.004;
       vec4 c = texture2D(tDiffuse, vUv);
       if (ca > 0.0) { c.r = texture2D(tDiffuse, vUv + d*ca*4.0).r; c.b = texture2D(tDiffuse, vUv - d*ca*4.0).b; }
+      // base painterly grade: a touch more colour, cool violet shade, warm highlights
+      float l0 = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+      c.rgb = mix(vec3(l0), c.rgb, 1.12);
+      c.rgb += vec3(-0.010, -0.004, 0.028) * (1.0 - smoothstep(0.0, 0.42, l0));
+      c.rgb *= mix(vec3(1.0), vec3(1.035, 1.0, 0.95), smoothstep(0.5, 1.0, l0));
+      c.rgb = clamp(c.rgb, 0.0, 1.0);
       float l = dot(c.rgb, vec3(0.299,0.587,0.114));
       vec3 gold = mix(vec3(l), c.rgb, 1.35) * vec3(1.14, 1.0, 0.70) + vec3(0.05, 0.03, 0.0);
       gold = mix(gold, gold*gold*1.4 + 0.02, 0.25);
@@ -39,7 +45,7 @@ export class Post {
     this.composer = new EffectComposer(renderer, rt);
     this.world = new RenderPass(scene, camera);
     this.weapon = new RenderPass(vm.scene, vm.camera); this.weapon.clear = false; this.weapon.clearDepth = true;
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.45, 0.92);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.6, 0.5, 1.0);
     this.output = new OutputPass();
     this.grade = new ShaderPass(GradeShader);
     this.fxaa = new ShaderPass(FXAAShader);
