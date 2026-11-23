@@ -82,8 +82,10 @@ export function buildRoundList() {
 //  A missing file never breaks anything: it shows a styled placeholder instead.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Zyoin logo (PNG with transparency works best). Missing file → text logo.
+// Zyoin logo (transparent PNG). Use ZYOIN_LOGO on light surfaces (navy text),
+// ZYOIN_LOGO_LIGHT on dark surfaces (cream text). Missing file → text logo.
 export const ZYOIN_LOGO = 'p/zyoin-logo.png';
+export const ZYOIN_LOGO_LIGHT = 'p/zyoin-logo-light.png';
 
 // Maps she can pick on the map-select screen. `id` must match a builder in src/maps/.
 export const MAPS = [
