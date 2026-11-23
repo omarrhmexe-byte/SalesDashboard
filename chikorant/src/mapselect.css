@@ -1,0 +1,115 @@
+/* ── MAP SELECT (after LOCK IN, before the intro) ───────────────────────────
+   Valorant-style map vote. The live 3D menu camera keeps drifting behind the
+   translucent backdrop. Tokens (--navy, --red, --disp…) come from style.css. */
+.mapsel { flex-direction: column; align-items: stretch; justify-content: flex-start; overflow: hidden; z-index: 11;
+  background:
+    linear-gradient(180deg, rgba(9,14,20,.94) 0%, rgba(9,14,20,.62) 22%, rgba(9,14,20,.62) 72%, rgba(9,14,20,.95) 100%),
+    radial-gradient(ellipse at 50% 120%, rgba(255,70,85,.28), transparent 60%);
+  animation: msIn .45s ease-out both; }
+.mapsel::before { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(115deg, transparent 0 60px, rgba(255,255,255,.02) 60px 61px); pointer-events: none; }
+@keyframes msIn { from { opacity: 0; } }
+
+.msTop { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: calc(14px + var(--safe-t)) calc(4vw + var(--safe-r)) 0 calc(4vw + var(--safe-l)); position: relative; z-index: 2; }
+.msMode { font: 700 11px var(--sans); letter-spacing: 4px; opacity: .6; white-space: nowrap; }
+.msTitle { font: 400 30px/1 var(--disp); letter-spacing: 6px; white-space: nowrap; }
+.msTitle::after { content: ''; display: block; width: 46px; height: 3px; margin: 6px auto 0; background: var(--red); }
+.msAgent { justify-self: end; display: inline-flex; align-items: center; gap: 9px; font: 400 18px/1 var(--disp); letter-spacing: 3px; white-space: nowrap; }
+.msAgent img { width: 30px; height: 30px; object-fit: cover; border: 2px solid var(--red); }
+.msAgent b { font-weight: 400; color: var(--red); }
+
+.msCards { flex: 1; min-height: 0; display: flex; justify-content: center; align-items: stretch; gap: 2.6vw; padding: 2.2vh calc(5vw + var(--safe-r)) 1.4vh calc(5vw + var(--safe-l)); position: relative; z-index: 2; }
+.msCard { position: relative; flex: 1 1 0; min-width: 0; max-width: 620px; max-height: 64vh; align-self: center; height: 100%; aspect-ratio: 16 / 11; padding: 0; border: 0; background: var(--navy2); cursor: pointer; overflow: hidden; text-align: left;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 26px), calc(100% - 26px) 100%, 0 100%);
+  transition: transform .25s cubic-bezier(.2,.8,.2,1), filter .25s; animation: msCardIn .7s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(.08s + var(--i) * .12s); }
+@keyframes msCardIn { from { opacity: 0; transform: translateY(40px) scale(.97); } }
+.msCard:focus-visible { outline: none; }
+.msCard:focus-visible .msC { opacity: 1; }
+.msArt, .msArt svg, .msShot { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.msArt { transition: transform 1.2s cubic-bezier(.2,.8,.2,1); }
+.msShot { object-fit: cover; opacity: 0; transition: opacity .7s ease; }
+.msShot.on { opacity: 1; }
+.msShade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(15,25,35,.35) 0%, transparent 28%, transparent 42%, rgba(15,25,35,.94) 88%), linear-gradient(90deg, rgba(15,25,35,.55), transparent 55%); transition: background .3s; }
+.msCard::after { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 1px rgba(236,232,225,.18); pointer-events: none; transition: box-shadow .25s; }
+
+.msTag { position: absolute; left: 0; top: 18px; font: 400 16px/1 var(--disp); letter-spacing: 4px; padding: 6px 14px 5px 16px; background: var(--red); color: #fff; }
+.msIdx { position: absolute; right: 18px; top: 10px; font: 400 64px/1 var(--tall); color: transparent; -webkit-text-stroke: 1px rgba(236,232,225,.45); }
+.msInfo { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 26px 22px; }
+.msName { font: 400 clamp(40px, 5.4vw, 92px)/.9 var(--tall); letter-spacing: 2px; text-shadow: 0 4px 0 rgba(0,0,0,.25); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msSub { font: 500 13px/1.5 var(--sans); opacity: .82; margin: 8px 0 0; max-width: 46ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.msCheck { position: absolute; right: 0; top: 18px; font: 400 16px/1 var(--disp); letter-spacing: 4px; padding: 6px 16px 5px 14px; background: var(--gold); color: var(--navy); transform: translateX(105%); transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+.msCheck::before { content: '✓ '; }
+
+/* selection corner brackets */
+.msC { position: absolute; width: 22px; height: 22px; border: 0 solid var(--gold); opacity: 0; transition: opacity .2s, transform .25s; pointer-events: none; }
+.msC.tl { left: 8px; top: 8px; border-width: 3px 0 0 3px; transform: translate(6px, 6px); }
+.msC.tr { right: 8px; top: 8px; border-width: 3px 3px 0 0; transform: translate(-6px, 6px); }
+.msC.bl { left: 8px; bottom: 8px; border-width: 0 0 3px 3px; transform: translate(6px, -6px); }
+.msC.br { right: 30px; bottom: 8px; border-width: 0 3px 3px 0; transform: translate(-6px, -6px); }
+
+.msCard:hover:not(:disabled) { transform: translateY(-4px); }
+.msCard:hover:not(:disabled) .msArt { transform: scale(1.04); }
+.msCard:hover:not(:disabled) .msC { opacity: .55; transform: none; }
+.msCard.picked { transform: translateY(-6px); }
+.msCard.picked::after { box-shadow: inset 0 0 0 3px var(--gold), inset 0 -120px 120px -60px rgba(255,194,26,.18); }
+.msCard.picked .msC { opacity: 1; transform: none; }
+.msCard.picked .msCheck { transform: none; }
+.msCard.picked .msArt { transform: scale(1.06); }
+.haspick .msCard:not(.picked):not(:hover) { filter: brightness(.6) saturate(.7); }
+
+/* map that can't be loaded yet */
+.msSoon { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(10,16,22,.62); text-align: center; }
+.msSoon b { font: 400 40px/1 var(--tall); letter-spacing: 6px; color: var(--cream); padding: 6px 18px; border: 2px solid rgba(236,232,225,.7); }
+.msSoon small { font: 700 10px var(--sans); letter-spacing: 3px; opacity: .7; text-transform: uppercase; }
+.msCard.soon { cursor: not-allowed; }
+.msCard.soon .msSoon { display: flex; }
+.msCard.soon .msArt { filter: grayscale(1) brightness(.7); }
+.msCard.soon .msTag { background: rgba(236,232,225,.25); }
+
+.msBottom { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 20px; padding: 6px calc(4vw + var(--safe-r)) calc(18px + var(--safe-b)) calc(4vw + var(--safe-l)); position: relative; z-index: 2; }
+.msPick { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.msPick span { font: 800 10px var(--sans); letter-spacing: 4px; opacity: .55; }
+.msPick b { font: 400 30px/1 var(--disp); letter-spacing: 4px; font-weight: 400; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msHint { justify-self: end; font: 700 10px var(--sans); letter-spacing: 3px; opacity: .5; text-align: right; }
+.msGo:disabled { opacity: .35; cursor: default; pointer-events: none; }
+.msGo:disabled::after { display: none; }
+
+/* confirm moment */
+.msFlash { position: absolute; inset: 0; background: radial-gradient(circle at 50% 50%, rgba(255,255,255,.85), rgba(255,194,26,.4) 35%, transparent 70%); opacity: 0; pointer-events: none; z-index: 5; }
+.mapsel.confirmed .msFlash { animation: lf 1.1s ease-out forwards; }
+.mapsel.confirmed .msCard.picked { animation: msPop .6s ease-out both; }
+.mapsel.confirmed .msCard:not(.picked) { filter: brightness(.35) saturate(.3); transform: scale(.97); }
+@keyframes msPop { 0% { transform: translateY(-6px) scale(1.04); filter: brightness(1.8); } 100% { transform: translateY(-6px); filter: none; } }
+
+/* intro now shows the chosen map's sentence-length subtitle */
+#intro .mapsub { max-width: 780px; margin: 0 auto; line-height: 1.8; }
+
+/* compact desktop windows */
+@media (max-height: 760px) and (min-width: 901px) {
+  .msTitle { font-size: 26px; } .msBottom { padding-bottom: calc(12px + var(--safe-b)); }
+}
+/* phones (landscape) and small windows */
+@media (max-width: 900px), (max-height: 560px) {
+  .msTop { padding-top: calc(8px + var(--safe-t)); }
+  .msMode { font-size: 9px; letter-spacing: 3px; }
+  .msTitle { font-size: 22px; letter-spacing: 4px; } .msTitle::after { margin-top: 4px; height: 2px; }
+  .msAgent { font-size: 15px; } .msAgent img { width: 24px; height: 24px; }
+  .msCards { gap: 14px; padding-top: 10px; padding-bottom: 8px; }
+  .msCard { max-height: none; aspect-ratio: auto; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%); }
+  .msTag, .msCheck { top: 10px; font-size: 13px; padding: 5px 10px 4px 12px; letter-spacing: 3px; }
+  .msIdx { font-size: 40px; right: 12px; top: 6px; }
+  .msInfo { padding: 0 16px 12px; }
+  .msName { font-size: clamp(30px, 6.2vw, 52px); }
+  .msSub { font-size: 11px; margin-top: 4px; }
+  .msSoon b { font-size: 26px; }
+  .msC { width: 16px; height: 16px; } .msC.br { right: 22px; }
+  .msBottom { gap: 12px; padding-bottom: calc(8px + var(--safe-b)); }
+  .msPick b { font-size: 22px; }
+  .msGo { height: 46px; font-size: 26px; width: min(300px, 40vw); }
+  .msHint { display: none; }
+  #intro .mapsub { max-width: 90vw; font-size: 10px; letter-spacing: 3px; }
+}
+@media (max-height: 420px) {
+  .msMode { display: none; } .msTop { grid-template-columns: auto 1fr; } .msTitle { text-align: left; } .msTitle::after { margin-left: 0; }
+  .msSub { -webkit-line-clamp: 1; }
+}
+@media (pointer: coarse) { .msHint { display: none; } }

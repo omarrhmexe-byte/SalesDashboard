@@ -5,6 +5,11 @@ export function addSolid(x0, y0, z0, x1, y1, z1, tag = null) {
   const s = { min: [Math.min(x0, x1), Math.min(y0, y1), Math.min(z0, z1)], max: [Math.max(x0, x1), Math.max(y0, y1), Math.max(z0, z1)], tag, on: true };
   solids.push(s); return s;
 }
+// Map switching: drop every collision box (the next map re-adds its own).
+export function resetSolids() { solids.length = 0; }
+// Swap the whole collision set (used to build a throwaway map for a preview snapshot without
+// disturbing the live one). Returns the previous set; `solids` stays the same array object.
+export function swapSolids(next = []) { const prev = solids.splice(0, solids.length); for (const s of next) solids.push(s); return prev; }
 
 const STEP = 0.55; // max climbable rise (the B-stage steps are 0.5 each)
 

@@ -175,3 +175,108 @@ export function showEnding(onAgain) {
   show('ending');
   $('againBtn').onclick = () => { sfx.click(); if (endAudio) { endAudio.pause(); endAudio = null; } duck(false); show('ending', false); onAgain(); };
 }
+
+// ── map select ──────────────────────────────────────────────────────────────
+// Valorant-style map vote: one card per MAPS entry (config.js). The card art is a stylised
+// SVG until a real snapshot of the map (rendered with the game camera) fades in over it.
+const MAP_ART = {
+  zyoin: `<svg viewBox="0 0 400 250" preserveAspectRatio="xMidYMid slice"><defs>
+    <linearGradient id="za" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a5d93"/><stop offset=".55" stop-color="#f2a27a"/><stop offset="1" stop-color="#ffd8a8"/></linearGradient>
+    <linearGradient id="zb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8d9c0"/><stop offset="1" stop-color="#b98d6a"/></linearGradient></defs>
+    <rect width="400" height="250" fill="url(#za)"/><circle cx="300" cy="150" r="34" fill="#ffe2b0" opacity=".9"/>
+    <path d="M0 160h40v-40h50v25h30v-60h60v45h40v-30h55v50h45v-35h80v135H0z" fill="#c8643b" opacity=".55"/>
+    <path d="M0 250V150h70v-20h90v30h80v-40h90v35h70v95z" fill="url(#zb)"/>
+    <g fill="#0f1923" opacity=".85">${[90, 140, 190, 250, 300, 350].map((x) => `<rect x="${x - 12}" y="178" width="24" height="30"/>`).join('')}</g>
+    <g fill="#2f8f88">${[90, 140, 190, 250, 300, 350].map((x) => `<rect x="${x - 20}" y="178" width="7" height="30"/><rect x="${x + 13}" y="178" width="7" height="30"/>`).join('')}</g>
+    <rect x="150" y="96" width="100" height="30" fill="#0f1923"/><text x="200" y="119" text-anchor="middle" font-family="Bebas Neue, Impact, sans-serif" font-size="26" fill="#ff4655" letter-spacing="3">ZYOIN</text></svg>`,
+  garba: `<svg viewBox="0 0 400 250" preserveAspectRatio="xMidYMid slice"><defs>
+    <radialGradient id="ga" cx=".5" cy="1" r="1"><stop offset="0" stop-color="#c2185b"/><stop offset=".45" stop-color="#4a1550"/><stop offset="1" stop-color="#120b24"/></radialGradient></defs>
+    <rect width="400" height="250" fill="url(#ga)"/>
+    ${[0, 1, 2].map((k) => `<path d="M-10 ${40 + k * 34} Q200 ${100 + k * 40} 410 ${40 + k * 34}" stroke="#2a1b10" stroke-width="1.5" fill="none"/>`).join('')}
+    ${Array.from({ length: 42 }, (_, i) => { const k = i % 3, t = (Math.floor(i / 3) + 0.5) / 14, x = -10 + t * 420, y = 40 + k * 34 + 2 * (60 + k * 6) * t * (1 - t); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="${['#ffc21a', '#ff5fd2', '#7fe3d6', '#ff4655'][i % 4]}"/>`; }).join('')}
+    <g stroke-linecap="round" stroke-width="9"><path d="M140 235L230 120" stroke="#ffc21a"/><path d="M260 235L170 120" stroke="#ff4655"/></g>
+    <g fill="#120b24" opacity=".9">${[40, 95, 300, 355].map((x, i) => `<ellipse cx="${x}" cy="${222 - (i % 2) * 6}" rx="16" ry="40"/><circle cx="${x}" cy="${172 - (i % 2) * 6}" r="11"/>`).join('')}</g></svg>`,
+};
+const MAP_ART_DEFAULT = '<svg viewBox="0 0 400 250" preserveAspectRatio="xMidYMid slice"><rect width="400" height="250" fill="#1b2733"/><path d="M0 250L120 120 200 190 280 90 400 250z" fill="#2f3e4d"/></svg>';
+
+let mapSel = null; // { maps, picked, busy, onConfirm }
+const cardOf = (id) => $('msCards').querySelector(`.msCard[data-id="${id}"]`);
+export function buildMapSelect(maps) {
+  $('msCards').innerHTML = maps.map((m, i) => `
+    <button class="msCard" data-id="${m.id}" style="--i:${i}" aria-pressed="false">
+      <div class="msArt">${MAP_ART[m.id] || MAP_ART_DEFAULT}<img class="msShot" alt=""></div>
+      <div class="msShade"></div>
+      <span class="msTag">${m.tag || 'MAP'}</span><span class="msIdx">${String(i + 1).padStart(2, '0')}</span>
+      <div class="msInfo"><div class="msName">${m.name}</div><p class="msSub">${m.sub || ''}</p></div>
+      <div class="msSoon"><b>COMING SOON</b><small>This map is still being built</small></div>
+      <div class="msCheck">SELECTED</div>
+      <i class="msC tl"></i><i class="msC tr"></i><i class="msC bl"></i><i class="msC br"></i>
+    </button>`).join('');
+  mapSel = { maps, picked: null, busy: false, onConfirm: null };
+  $('msCards').querySelectorAll('.msCard').forEach((el) => {
+    el.addEventListener('mouseenter', () => { if (!el.disabled) sfx.hover(); });
+    el.addEventListener('click', () => pickMap(el.dataset.id));
+    el.addEventListener('dblclick', () => { if (mapSel.picked === el.dataset.id) confirmMap(); });
+  });
+  $('msGo').addEventListener('click', confirmMap);
+  $('msGo').addEventListener('mouseenter', () => sfx.hover());
+  addEventListener('keydown', (e) => {
+    if ($('mapsel').hidden || !mapSel || mapSel.busy) return;
+    const ids = mapSel.maps.map((m) => m.id).filter((id) => !cardOf(id).disabled);
+    if (!ids.length) return;
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') { const i = ids.indexOf(mapSel.picked); pickMap(ids[i < 0 ? 0 : (i + (e.code === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length]); }
+    else if (/^Digit[1-9]$/.test(e.code)) { const m = mapSel.maps[+e.code.slice(5) - 1]; if (m) pickMap(m.id); }
+    else if ((e.code === 'Enter' || e.code === 'NumpadEnter') && mapSel.picked) { e.preventDefault(); confirmMap(); }
+  });
+}
+function pickMap(id) {
+  if (!mapSel || mapSel.busy || !id) return;
+  const el = cardOf(id); if (!el || el.disabled) return;
+  if (mapSel.picked !== id) sfx.click();
+  mapSel.picked = id;
+  $('msCards').querySelectorAll('.msCard').forEach((c) => { const on = c === el; c.classList.toggle('picked', on); c.setAttribute('aria-pressed', on); });
+  $('msPickName').textContent = mapSel.maps.find((x) => x.id === id).name; $('mapsel').classList.add('haspick');
+  $('msGo').disabled = false;
+}
+// Stays synchronous up to onConfirm(): the game requests pointer lock inside this click.
+function confirmMap() {
+  if (!mapSel || mapSel.busy || !mapSel.picked) return;
+  mapSel.busy = true;
+  const go = $('msGo'); go.classList.add('locked'); go.textContent = 'LOADING';
+  $('mapsel').classList.add('confirmed');
+  if (mapSel.onConfirm) mapSel.onConfirm(mapSel.picked);
+}
+export function setMapAvailable(id, ok) {
+  const el = cardOf(id); if (!el) return;
+  el.disabled = !ok; el.classList.toggle('soon', !ok);
+  if (!ok && mapSel && mapSel.picked === id) { mapSel.picked = null; el.classList.remove('picked'); $('msGo').disabled = true; $('msPickName').textContent = '—'; $('mapsel').classList.remove('haspick'); }
+}
+export function setMapShot(id, url) {
+  const el = cardOf(id); if (!el || !url) return;
+  const img = el.querySelector('.msShot'); img.onload = () => img.classList.add('on'); img.src = url;
+}
+// opts: { current, available(id) → Promise<bool>, preview(id) → Promise<dataURL|null>, onConfirm(id) }
+export function openMapSelect({ current, available, preview, onConfirm }) {
+  const go = $('msGo'); go.classList.remove('locked'); go.textContent = 'CONFIRM'; go.disabled = true;
+  $('mapsel').classList.remove('confirmed', 'haspick'); $('msPickName').textContent = '—';
+  Object.assign(mapSel, { busy: false, picked: null, onConfirm });
+  $('msCards').querySelectorAll('.msCard').forEach((c) => { c.classList.remove('picked'); c.setAttribute('aria-pressed', 'false'); });
+  show('mapsel');
+  // availability first (cheap), then pre-select the loaded map, then snapshots one at a time
+  (async () => {
+    for (const m of mapSel.maps) setMapAvailable(m.id, await available(m.id));
+    if (!mapSel.picked && !mapSel.busy && current && cardOf(current) && !cardOf(current).disabled) pickMap(current);
+    await new Promise((r) => setTimeout(r, 700)); // let the cards animate in first
+    const order = [current, ...mapSel.maps.map((m) => m.id).filter((id) => id !== current)];
+    for (const id of order) {
+      if ($('mapsel').hidden || mapSel.busy) return;
+      const el = cardOf(id); if (!el || el.disabled) continue;
+      const url = await preview(id); setMapShot(id, url);
+      if (!url && id !== current) setMapAvailable(id, await available(id)); // a preview build can reveal a broken map
+    }
+  })().catch((e) => console.warn('[mapselect]', e));
+}
+export function setIntroMap(m) {
+  $('introMap').textContent = m.name;
+  $('introSub').textContent = (m.sub || '').toUpperCase();
+}
