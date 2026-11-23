@@ -1,11 +1,15 @@
-// ZYOIN HQ — original three-lane, two-site Mediterranean office campus (~90×70).
-// North is −Z. Attackers spawn south (+Z). A Site "The Pantry" NW, B Site "Summit Hall" NE,
-// Mid "Garba Courtyard" in the centre.
+// ZYOIN HQ — our office: a three-lane, two-site sunlit courtyard campus in Bangalore (~90×70).
+// North is −Z. Attackers spawn in Reception (south, +Z) next to the photo wall and the WOW CHAMP
+// trophy shelf. A Site "The Pantry" NW (with the cat), B Site "Summit Hall" NE (GCC stage, LED
+// wall, sponsor wall), Mid "The Courtyard" (fountain) and the open-plan office + glass meeting
+// room behind it. Map interface contract: see src/maps/index.js.
 import * as THREE from 'three';
 import { box, mesh, flush, outlineMaterial, addOutlines, contact, contactRound } from '../builder.js';
 import { addSolid } from '../physics.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as T from '../textures.js';
+import { photoFrame, logoPlane, loadPhoto } from '../photos.js';
+import { ZYOIN_LOGO, MAP_PHOTOS } from '../config.js';
 
 const PI = Math.PI;
 
@@ -76,8 +80,17 @@ export function buildZyoinMap(scene, { quality } = {}) {
     barRed: glow(3.2, 0.45, 0.6),
     signBack: new THREE.MeshStandardMaterial({ color: 0x0f1923, roughness: 0.6, transparent: true, opacity: 0.85 }),
     water: waterMaterial(),
+    // office
+    deskTop: std(0xf4f1ea, null, { rough: 0.5, paint: 0.1 }),
+    chair: std(0x27323e, null, { rough: 0.75, paint: 0 }),
+    fabric: std(0x2f8f88, null, { rough: 1, paint: 0.2 }),
+    gold: std(0xffc21a, null, { rough: 0.25, metal: 0.85, paint: 0 }),
+    whiteboard: std(0xf8f7f3, null, { rough: 0.22, paint: 0 }),
+    screen: glow(0.34, 0.8, 1.3),
+    frosted: new THREE.MeshStandardMaterial({ color: 0xd4edf3, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.2, depthWrite: false, vertexColors: true }),
+    frostBand: new THREE.MeshStandardMaterial({ color: 0xf4fbfc, roughness: 0.6, transparent: true, opacity: 0.72, depthWrite: false, vertexColors: true }),
   };
-  for (const k of ['water', 'lampGlass', 'barCyan', 'barWarm', 'barRed', 'kerb', 'signBack']) M[k].userData.noShadow = true;
+  for (const k of ['water', 'lampGlass', 'barCyan', 'barWarm', 'barRed', 'kerb', 'signBack', 'screen', 'frosted', 'frostBand']) M[k].userData.noShadow = true;
   const WA = T.wearAtlas(); const wearMat = new THREE.MeshStandardMaterial({ map: WA.tex, transparent: true, depthWrite: false, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); wearMat.userData.noShadow = true;
   const PA = T.posterAtlas(); const posterMat = new THREE.MeshStandardMaterial({ map: PA.tex, roughness: 0.85 }); posterMat.userData.noShadow = true;
   const dyn = { anim: [], signs: [] };
@@ -195,8 +208,6 @@ export function buildZyoinMap(scene, { quality } = {}) {
   windowsAlong('x', -8, -26, -9, -1); windowsAlong('x', -8, 9, 26, -1);
 
   // ── spawn ─────────────────────────────────────────────────────────────────
-  box(-11.5, 0, 33.5, -8.5, 1.2, 34.9, M.crate, { outline: true, uv: 1.3 });
-  box(8.5, 0, 33, 11.5, 1.6, 34.9, M.crate, { outline: true, uv: 1.3 });
   potPlant(-11, 27.2); potPlant(11, 27.2);
 
   // ── plaza (between spawn and lanes) ───────────────────────────────────────
@@ -254,8 +265,6 @@ export function buildZyoinMap(scene, { quality } = {}) {
   addSolid(TX - 1.6, 0, TZ - 1.6, TX + 1.6, 0.7, TZ + 1.6); contactRound(TX, TZ, 2.05, 0, 0.6); addSolid(TX - 0.45, 0, TZ - 0.45, TX + 0.45, 4, TZ + 0.45);
   tree(TX, 0.7, TZ, 1.25);
   planterBox(-6.5, -22, 2.2, 2.2);
-  box(-6.5, 0, -32.5, -3.5, 0.5, -31.7, M.wood, { outline: true, uv: 1.5 });
-  box(3.5, 0, -32.5, 6.5, 0.5, -31.7, M.wood, { outline: true, uv: 1.5 });
   crate(-9.5, -21, 1.5, 1.5); crate(9.6, -14.5, 1.6, 1.4);
 
   // ── A SITE: The Pantry ────────────────────────────────────────────────────
@@ -367,13 +376,14 @@ export function buildZyoinMap(scene, { quality } = {}) {
   // LED wall screen
   const led = new THREE.Mesh(new THREE.PlaneGeometry(14.6, 4.4), new THREE.MeshBasicMaterial({ map: ledTexture(), toneMapped: true }));
   led.material.color.setScalar(1.15); led.position.set(33.5, 3.3, -34.38); scene.add(led); dyn.led = led;
+  const ledLogo = logoPlane(ZYOIN_LOGO, { w: 4.8, h: 1.7, fallbackText: 'ZYOIN', color: '#FF4655', emissive: 1.1 });
+  ledLogo.position.set(29.0, 3.55, -34.34); ledLogo.renderOrder = 2; scene.add(ledLogo);
 
   // ── signs ─────────────────────────────────────────────────────────────────
-  sign('ZYOIN HQ', T.PAL.red, [0, 6.0, 25.38], 0, 9, { sub: 'ATTACKER SPAWN', subColor: T.PAL.cream, hdr: 2.2 });
   sign('GCC SUMMIT', '#40e0ff', [33.5, 6.6, -34.9], 0, 11, { hdr: 1.8, sub: 'INDIA · 2026', subColor: '#ffc21a' });
-  sign('GARBA NIGHT', '#ff5fd2', [0, 6.6, 16.25], 0, 9.5, { hdr: 1.7, sub: 'DANCE LIKE NOBODY IS WATCHING', subColor: '#ffc21a' });
-  sign('NOT GOODBYE', T.PAL.marigold, [0, 4.6, -34.9], 0, 12, { hdr: 1.5, sub: 'SEE YOU LATER', subColor: T.PAL.red });
+  sign('THE COURTYARD', T.PAL.cream, [0, 6.6, 16.25], 0, 9.5, { hdr: 1.3, sub: 'CHAI · CALLS · CHAOS', subColor: '#ffc21a' });
   sign('THE PANTRY', T.PAL.cream, [-27, 4.6, -34.9], 0, 7, { hdr: 0.9, sub: 'A SITE', subColor: T.PAL.red });
+  sign('NOT GOODBYE', T.PAL.marigold, [0, 4.6, -34.9], 0, 12, { hdr: 1.5, sub: 'SEE YOU LATER', subColor: T.PAL.red });
   sign('SUMMIT HALL', T.PAL.cream, [12.7, 4.8, -24], PI / 2, 6.5, { hdr: 0.9, sub: 'B SITE', subColor: T.PAL.red });
   sign('A', T.PAL.red, [-12.7, 5.0, -18], -PI / 2, 3.5, { hdr: 1.6 });
   sign('B', T.PAL.red, [12.68, 5.0, -18], PI / 2, 3.5, { hdr: 1.6 });
@@ -384,39 +394,14 @@ export function buildZyoinMap(scene, { quality } = {}) {
   // painted floor letters
   floorDecal('A', [-27, 0.015, -27], 7);
   floorDecal('B', [30, 0.015, -21], 7);
-  // spawn banner on the back wall
-  const ban = new THREE.Mesh(new THREE.PlaneGeometry(11, 5.5, 20, 4), new THREE.MeshStandardMaterial({ map: T.bannerTexture('ZYOIN HQ', { sub: 'BANGALORE · EST. WITH LOVE' }), roughness: 0.9, side: THREE.DoubleSide }));
-  { const p = ban.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin(p.getX(i) * 1.1) * 0.08); ban.geometry.computeVertexNormals(); }
-  ban.position.set(0, 4.2, 34.85); ban.rotation.y = PI; ban.receiveShadow = true; scene.add(ban);
   // vertical drapes either side of the spawn gate
   for (const sx of [-10.5, 10.5]) {
     const d = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 4.2), new THREE.MeshStandardMaterial({ map: T.stripeTexture('#FF4655', '#0F1923', 2), side: THREE.DoubleSide, roughness: 0.9 }));
     d.position.set(sx, 2.7, 25.3); scene.add(d);
   }
 
-  // ── cloth awnings over mid ───────────────────────────────────────────────
-  const awn = [
-    [-9, 8.5, 1, '#FF4655', '#ECE8E1'], [-9, -4.5, 1, '#FFC21A', '#2F8F88'],
-    [9, 11.5, -1, '#2F8F88', '#ECE8E1'], [9, -3, -1, '#FF4655', '#FFC21A'],
-    [-26, -3.5, -1, '#FFC21A', '#C8643B'], [26, 10, 1, '#FF4655', '#ECE8E1'],
-  ];
-  for (const [wx, wz, dir, a, b] of awn) {
-    const g = new THREE.PlaneGeometry(4.2, 2.0, 12, 6);
-    const p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) { const v = (p.getY(i) + 1) / 2; p.setZ(i, Math.sin(v * PI) * 0.18 + Math.sin(p.getX(i) * 3) * 0.03); }
-    g.computeVertexNormals();
-    const o3 = new THREE.Object3D(); o3.rotation.order = 'YXZ'; o3.rotation.y = dir > 0 ? PI / 2 : -PI / 2; o3.rotation.x = -0.95; o3.position.set(wx + dir * 0.85, 3.35, wz); o3.updateMatrix();
-    g.applyMatrix4(o3.matrix);
-    // scalloped valance hanging off the front edge (same texture, bottom band), merged with the canopy
-    const vg = new THREE.PlaneGeometry(4.2, 0.42); const vuv = vg.attributes.uv; for (let i = 0; i < vuv.count; i++) vuv.setY(i, vuv.getY(i) * 0.32);
-    vg.rotateY(dir > 0 ? PI / 2 : -PI / 2); vg.translate(wx + dir * 1.66, 2.56, wz);
-    const m = new THREE.Mesh(mergeGeometries([g, vg]), new THREE.MeshStandardMaterial({ map: T.stripeTexture(a, b, 8), side: THREE.DoubleSide, roughness: 0.95 }));
-    m.castShadow = hi; m.receiveShadow = true; m.matrixAutoUpdate = false; scene.add(m);
-    // support rods
-    mesh(new THREE.CylinderGeometry(0.03, 0.03, 4.2, 6), M.dark, { p: [wx + dir * 1.62, 2.82, wz], r: [PI / 2, 0, 0] });
-  }
 
-  // ── string lights & marigold garlands (instanced) ─────────────────────────
+  // ── string lights (instanced) ─────────────────────────
   const bulbs = [], marigolds = [], wires = [];
   function catenary(a, b, sag, n, out, jitter = 0) {
     const pts = [];
@@ -435,25 +420,6 @@ export function buildZyoinMap(scene, { quality } = {}) {
     [[-26, 5.6, 2.3], [-26, 5.6, 5.7]], [[-45, 6.0, 12], [-26, 6, 6]], [[45, 6.0, 12], [26, 6, 6]],
   ];
   for (const [a, b] of lightRuns) catenary(new THREE.Vector3(...a), new THREE.Vector3(...b), 1.1, Math.round(new THREE.Vector3(...a).distanceTo(new THREE.Vector3(...b)) * 1.6), bulbs);
-  const garlandRuns = [
-    [[-8.95, 7.2, -8], [-8.95, 7.2, 2]], [[-8.95, 7.2, 6], [-8.95, 7.2, 16]], [[8.95, 7.2, -8], [8.95, 7.2, 2]], [[8.95, 7.2, 6], [8.95, 7.2, 16]],
-    [[-9, 5.6, 15.55], [0, 5.6, 15.55]], [[0, 5.6, 15.55], [9, 5.6, 15.55]],
-    [[-12, 4.9, 25.3], [0, 4.9, 25.3]], [[0, 4.9, 25.3], [12, 4.9, 25.3]],
-    [[-12.65, 5.2, -20.5], [-12.65, 5.2, -15.5]], [[12.65, 5.2, -20.5], [12.65, 5.2, -15.5]],
-  ];
-  for (const [a, b] of garlandRuns) {
-    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b); const L = A.distanceTo(B);
-    // scalloped festoons
-    const segs = Math.max(2, Math.round(L / 2.2));
-    for (let s = 0; s < segs; s++) {
-      const p0 = A.clone().lerp(B, s / segs), p1 = A.clone().lerp(B, (s + 1) / segs);
-      const pts = []; const n = 14;
-      for (let i = 0; i <= n; i++) { const t = i / n; const p = p0.clone().lerp(p1, t); p.y -= 0.55 * 4 * t * (1 - t); pts.push(p); }
-      pts.forEach((p) => marigolds.push(p));
-      // hanging strands (toran)
-      const hang = p0.clone(); for (let k = 1; k < 6; k++) marigolds.push(hang.clone().add(new THREE.Vector3(0, -k * 0.14, 0)));
-    }
-  }
   if (bulbs.length) {
     const g = new THREE.SphereGeometry(0.075, 6, 4);
     const m = new THREE.MeshBasicMaterial({ toneMapped: true });
@@ -602,14 +568,14 @@ export function buildZyoinMap(scene, { quality } = {}) {
   spot(33.5, -29.6, 6.6, 33.5, -31.5, [1.0, 0.85, 0.6]); spot(37, -29.6, 6.6, 37.4, -30, [0.3, 0.8, 1.0]);
   spot(40.5, -29.6, 6.6, 39.5, -31, [1.0, 0.75, 0.45]); spot(19, -29.6, 6.6, 20, -24, [0.9, 0.5, 0.25]);
   // event banners hanging on the hall walls
-  poster('z', 45, -16, -1, 4.6, 4, 2.2); poster('z', 45, -21.5, -1, 4.6, 7, 2.2); poster('x', -35, 17, 1, 4.6, 1, 2.0);
+  poster('z', 45, -16, -1, 4.6, 4, 2.2); poster('z', 45, -21.5, -1, 4.6, 7, 2.2); poster('x', -35, 17, 1, 4.6, 3, 2.0);
 
   // posters on lanes / corridors / spawn
   poster('x', 2, -17, 1, 1.75, 0); poster('x', 2, -14.6, 1, 1.85, 2); poster('x', 6, -21, -1, 1.8, 6);
   poster('x', 2, 15.5, 1, 1.8, 3); poster('x', 6, 13.2, -1, 1.75, 5); poster('x', 6, 21.6, -1, 1.85, 0);
-  poster('z', -45, 12.6, 1, 1.9, 5); poster('z', 45, -1.2, -1, 1.9, 2); poster('z', -26, -4.3, -1, 1.8, 1);
+  poster('z', -45, 12.6, 1, 1.9, 5); poster('z', 45, -1.2, -1, 1.9, 2); poster('z', -26, -4.3, -1, 1.8, 4);
   poster('x', 26, -35.5, -1, 1.8, 3); poster('x', 26, 38.5, -1, 1.8, 4); poster('z', 26, 12.6, 1, 1.85, 6);
-  poster('z', -12.6, -11, -1, 1.9, 7); poster('z', 12.6, -11.5, 1, 1.9, 1);
+  poster('z', -12.6, -11, -1, 1.9, 7); poster('z', 12.6, -11.5, 1, 1.9, 0);
 
   // bougainvillea spilling over walls and building corners
   cascade('z', -9, 13.2, 16, 1, 7.5, { drop: 3.4, n: 34 }); cascade('x', 16, -13, -9, 1, 7.5, { drop: 3.0, n: 26 });
@@ -622,16 +588,6 @@ export function buildZyoinMap(scene, { quality } = {}) {
   cascade('z', 45, -35, -31, -1, 8.5, { drop: 3.4, n: 30, leafy: 0.75 }); cascade('z', -45, -14, -9, 1, 8.5, { drop: 3.8, n: 32, leafy: 0.8 });
   cascade('x', -35, 7.2, 11.4, 1, 8.5, { drop: 4.0, n: 26, leafy: 0.85 }); cascade('x', -35, -11.4, -7.2, 1, 8.5, { drop: 4.0, n: 26, leafy: 0.85 });
 
-  // Garba courtyard: lantern strings + diyas on the fountain rim, planters and window sills
-  const lanternRuns = [[[-9, 5.3, 0.5], [9, 5.3, 0.5]], [[-9, 5.0, 9.5], [9, 5.0, 9.5]], [[-9, 5.6, -5], [9, 5.4, 13]], [[-12, 5.4, -20], [12, 5.4, -20]], [[-45, 5.2, 21], [-26, 5.2, 21]], [[26, 5.2, 21], [45, 5.2, 21]], [[-12, 5.6, 21], [12, 5.6, 21]]];
-  lanternRuns.forEach(([a, b], ri) => {
-    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b); const n = Math.round(A.distanceTo(B) / 2.1);
-    const pts = catenary(A, B, 0.9, 24, null);
-    for (let i = 1; i < n; i++) { const p = pts[Math.round((i / n) * 24)]; lanterns.push([p.x, p.y - 0.45, p.z, (i + ri) % 4]); wireSeg([p.x, p.y, p.z], [p.x, p.y - 0.22, p.z]); }
-  });
-  for (let i = 0; i < 18; i++) { const a = (i / 18) * PI * 2; diyas.push([Math.cos(a) * 2.4, 0.995, fz + Math.sin(a) * 2.4]); }
-  for (const [axis, fixed, s0, side, y] of sills) if (Math.abs(fixed) === 9 || fixed === 16) for (const o of [-0.45, 0.45]) diyas.push(axis === 'x' ? [s0 + o, y, fixed + side * 0.24] : [fixed + side * 0.24, y, s0 + o]);
-  for (const [x, y, z] of [[-4.9, 0.8, 17.8], [-3.1, 0.8, 17.8], [3.1, 0.8, 17.8], [4.9, 0.8, 17.8], [-8.3, 0.8, 12.4], [-6.9, 0.8, 13.6], [7.0, 0.8, -6.1], [8.2, 0.8, -4.9], [-10.3, 1.2, 34.6], [-9.1, 1.2, 34.6], [9.5, 1.6, 34.6], [10.6, 1.6, 34.6]]) diyas.push([x, y, z]);
 
   // skyline roofs & domes so the silhouette over the walls reads as a town
   for (const [x, z, w, d, h, kind] of skyline) {
@@ -639,13 +595,8 @@ export function buildZyoinMap(scene, { quality } = {}) {
     else if (kind < 0.75) mesh(new THREE.SphereGeometry(Math.min(w, d) * 0.3, 18, 8, 0, PI * 2, 0, PI / 2), M.teal, { p: [x, h + 0.4, z], uv: 2 });
   }
 
-  // bunting (triangular pennants) criss-crossing the courtyard, plaza, lanes and back hall
-  const buntingRuns = [
-    [[-9, 7.1, 4], [9, 7.1, 4]], [[-9, 7.2, -7], [9, 7.2, 15]], [[-9, 7.2, 15], [9, 7.2, -7]],
-    [[-12, 6.8, 25.6], [-26, 7.3, 16.2]], [[12, 6.8, 25.6], [26, 7.3, 16.2]], [[-45, 7.8, 1], [-26, 7.3, -5]], [[45, 7.8, 9], [26, 7.3, 13]],
-    [[-12, 6.6, -12.5], [12, 6.6, -12.5]], [[-12, 6.6, -27], [12, 6.6, -31]],
-  ];
-  for (const [a, b] of buntingRuns) bunting(catenary(new THREE.Vector3(...a), new THREE.Vector3(...b), 0.8, 30, null));
+
+  officePass();
 
   // instanced dressing (one draw call each)
   buildFlowers(); buildLanterns(); buildDiyas(); buildCones(); buildWires(); buildBunting();
@@ -1000,6 +951,277 @@ export function buildZyoinMap(scene, { quality } = {}) {
     m.rotation.x = -PI / 2; m.position.set(...pos); m.receiveShadow = true; scene.add(m);
   }
 
+  // ══ OFFICE PASS: reception, photo wall, trophies, desks, meeting room, boards ══
+  // Static props go through the batcher (a handful of draw calls in total). Canvas panels, logos
+  // and photos are separate meshes. All coordinates stay clear of the nav edges and posts.
+  function officePass() {
+    const rot = (ox, oz, ry, lx, lz) => [ox + lx * Math.cos(ry) + lz * Math.sin(ry), oz - lx * Math.sin(ry) + lz * Math.cos(ry)];
+    // a box in a local frame (origin ox,oz; rotated ry about Y), decor only
+    const part = (ox, oz, ry, lx, y, lz, w, h, d, mat) => { const [x, z] = rot(ox, oz, ry, lx, lz); mesh(new THREE.BoxGeometry(w, h, d), mat, { p: [x, y, z], r: [0, ry, 0], uv: 1 }); };
+
+    // ── RECEPTION (attacker spawn) ──
+    // logo wall behind the desk
+    box(-4.7, 2.9, 34.82, 4.7, 5.9, 35, M.dark, { collide: false, ao: 0 });
+    box(-4.7, 2.82, 34.78, 4.7, 2.9, 35, M.barRed, { collide: false, ao: 0 });
+    const recLogo = logoPlane(ZYOIN_LOGO, { w: 8, h: 2.3, fallbackText: 'ZYOIN', emissive: 0.7 });
+    recLogo.position.set(0, 4.45, 34.8); recLogo.rotation.y = PI; scene.add(recLogo);
+    // desk: navy body, red kick strip, pale counter, monitor, bell, a little plant
+    box(-3.4, 0, 32.95, 3.4, 1.0, 34.0, M.navy, { outline: true, uv: 1.5, ao: 1 });
+    box(-3.55, 1.0, 32.85, 3.55, 1.08, 34.1, M.deskTop, { collide: false, outline: true });
+    addSolid(-3.55, 1.0, 32.85, 3.55, 1.08, 34.1);
+    box(-3.41, 0.12, 32.93, 3.41, 0.2, 32.95, M.barRed, { collide: false, ao: 0 });
+    monitor(1.6, 1.08, 33.55, 0); monitor(-1.2, 1.08, 33.6, 0.25);
+    mesh(new THREE.SphereGeometry(0.09, 12, 6, 0, PI * 2, 0, PI / 2), M.gold, { p: [0.3, 1.08, 33.2] });
+    mug(-2.5, 1.08, 33.3, M.red); mug(2.6, 1.08, 33.25, M.cream);
+    mesh(new THREE.CylinderGeometry(0.16, 0.12, 0.28, 12), M.terracotta, { p: [-3.0, 1.22, 33.7] }); shrub(-3.0, 1.32, 33.7, 0.32);
+    chair(-0.2, 34.55, PI); chair(1.9, 34.5, PI + 0.3);
+    textPanel((x, W, H) => {
+      x.fillStyle = '#0F1923'; x.fillRect(0, 0, W, H);
+      x.fillStyle = '#ECE8E1'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = `${H * 0.46}px "Bebas Neue", Impact, sans-serif`; x.fillText('WELCOME TO ZYOIN', W / 2, H * 0.42);
+      x.fillStyle = '#FF4655'; x.font = `700 ${H * 0.13}px Inter, sans-serif`; x.fillText('BANGALORE · PLEASE SIGN THE VISITOR BOOK', W / 2, H * 0.78);
+    }, 5.2, 0.62, [0, 0.62, 32.93], PI);
+    // gate lintel: logo facing the spawn
+    box(-3.3, 5.25, 26.6, 3.3, 6.85, 26.68, M.dark, { collide: false, ao: 0 });
+    const gateLogo = logoPlane(ZYOIN_LOGO, { w: 5.8, h: 1.45, fallbackText: 'ZYOIN HQ', emissive: 0.9 });
+    gateLogo.position.set(0, 6.05, 26.7); scene.add(gateLogo);
+    // lobby sofas in the back corners (where the crates used to be)
+    for (const [x0, x1] of [[-11.7, -8.3], [8.3, 11.7]]) {
+      box(x0, 0, 33.7, x1, 0.45, 34.95, M.red, { outline: true, uv: 1.2 });
+      box(x0, 0.45, 34.5, x1, 1.0, 34.95, M.red, { outline: true, uv: 1.2 });
+      for (const ax of [x0, x1 - 0.22]) box(ax, 0.45, 33.7, ax + 0.22, 0.72, 34.5, M.red, { collide: false, outline: true });
+      for (let k = 0; k < 3; k++) { const cx = x0 + 0.45 + k * ((x1 - x0 - 0.9) / 2); mesh(new THREE.BoxGeometry(0.62, 0.36, 0.16), M.cream, { p: [cx, 0.68, 34.38], r: [-0.25, 0, (k - 1) * 0.12], uv: 1 }); }
+    }
+    // WOW CHAMP trophy shelf on the east wall
+    box(11.1, 0, 28.6, 12, 2.5, 31.9, M.wood, { outline: true, uv: 1.2, ao: 2.5 });
+    box(11.05, 0.25, 28.75, 11.12, 2.35, 31.75, M.dark, { collide: false, ao: 0 });
+    for (const y of [0.9, 1.65]) box(10.75, y - 0.04, 28.7, 11.1, y, 31.8, M.plaster, { collide: false });
+    trophy(10.92, 1.65, 30.25, 1.25); trophy(10.92, 1.65, 29.3, 0.75); trophy(10.92, 1.65, 31.2, 0.75);
+    trophy(10.92, 0.9, 29.6, 0.6); trophy(10.92, 0.9, 30.9, 0.6);
+    for (const z of [29.0, 30.25, 31.5]) box(10.85, 0.9, z - 0.18, 10.95, 1.12, z + 0.18, M.gold, { collide: false }); // medals / plaques
+    textPanel((x, W, H) => {
+      x.fillStyle = '#0F1923'; x.fillRect(0, 0, W, H); x.strokeStyle = '#FFC21A'; x.lineWidth = H * 0.05; x.strokeRect(H * 0.06, H * 0.06, W - H * 0.12, H - H * 0.12);
+      x.fillStyle = '#FFC21A'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = `${H * 0.5}px "Bebas Neue", Impact, sans-serif`; x.fillText('★ WOW CHAMP ★', W / 2, H * 0.42);
+      x.fillStyle = '#ECE8E1'; x.font = `700 ${H * 0.12}px Inter, sans-serif`; x.fillText('CHIKERO · THE ONLY MARKETER TO EVER WIN IT', W / 2, H * 0.76);
+    }, 3.0, 0.72, [11.08, 2.95, 30.25], -PI / 2, { emissive: 0.25 });
+    // photo-wall header (west wall); the photos themselves are hung by hangPhotos()
+    textPanel((x, W, H) => {
+      x.fillStyle = '#ECE8E1'; x.fillRect(0, 0, W, H); x.fillStyle = '#FF4655'; x.fillRect(0, H * 0.82, W, H * 0.18);
+      x.fillStyle = '#0F1923'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = `${H * 0.56}px "Bebas Neue", Impact, sans-serif`; x.fillText('#ZYOINFAM · THE WALL', W / 2, H * 0.44);
+    }, 4.6, 0.62, [-11.95, 5.95, 30.6], PI / 2);
+    box(-12, 6.35, 27.2, -11.85, 6.42, 34, M.barWarm, { collide: false, ao: 0 }); // picture light
+
+    // ── A SITE: THE PANTRY ──
+    for (const [x, z, m] of [[-30.4, -20.4, M.red], [-29.9, -21.1, M.cream], [-27.8, -20.6, M.teal], [-26.2, -21.0, M.marigold], [-24.8, -20.5, M.navy]]) mug(x, 1.1, z, m);
+    for (const [x, m] of [[-33.2, M.cream], [-32.8, M.red], [-25.9, M.teal], [-23.5, M.marigold], [-22.9, M.cream]]) mug(x, 1.05, -34.25, m);
+    box(-29.6, 1.1, -21.3, -28.9, 1.13, -20.4, M.wood, { collide: false }); // tray
+    // notice board on the west wall (the polaroids get pinned on its right edge)
+    box(-45, 1.15, -16.35, -44.9, 2.8, -13.15, M.wood, { collide: false, ao: 0 });
+    textPanel(drawNoticeBoard, 3.0, 1.45, [-44.88, 1.975, -14.75], PI / 2);
+    textPanel((x, W, H) => {
+      x.fillStyle = '#0F1923'; x.fillRect(0, 0, W, H); x.fillStyle = '#FFC21A'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = `${H * 0.62}px "Bebas Neue", Impact, sans-serif`; x.fillText('THE GREAT CAT RESCUE', W / 2, H * 0.55);
+    }, 2.6, 0.36, [-44.95, 3.28, -19.4], PI / 2, { emissive: 0.2 });
+
+    // ── OPEN-PLAN OFFICE (back hall, north of mid) ──
+    deskPod(-9.0, -31.5); deskPod(-3.6, -31.5); deskPod(-3.6, -25.4);
+    potPlant(-1.4, -34.3); potPlant(-11.0, -34.3); potPlant(-11.0, -22.6);
+    // whiteboard with doodles (west wall, between the pilasters)
+    box(-11.4, 1.0, -27.45, -11.3, 2.55, -24.55, M.metal, { collide: false, ao: 0 });
+    textPanel(drawWhiteboard, 2.8, 1.4, [-11.28, 1.775, -26.0], PI / 2);
+    box(-11.4, 0.92, -27.2, -11.18, 0.98, -24.8, M.metal, { collide: false, ao: 0 });
+    for (const [z, m] of [[-26.9, M.red], [-26.75, M.navy], [-26.6, M.teal]]) box(-11.27, 0.98, z - 0.02, -11.2, 1.0, z + 0.06, m, { collide: false });
+    // glass meeting room in the NE corner: frosted band, dark mullions, door gap at x 4.0..5.4
+    const GZ = -29.5, GX = 2.5, GH = 2.8;
+    const glassX = (x0, x1) => { box(x0, 0, GZ - 0.03, x1, GH, GZ + 0.03, M.frosted, { collide: true, ao: 0, shadow: false }); box(x0, 1.05, GZ - 0.04, x1, 1.45, GZ + 0.04, M.frostBand, { collide: false, ao: 0 }); };
+    glassX(GX, 4.0); glassX(5.4, 11.4);
+    box(GX - 0.03, 0, -35, GX + 0.03, GH, GZ, M.frosted, { collide: true, ao: 0, shadow: false });
+    box(GX - 0.04, 1.05, -35, GX + 0.04, 1.45, GZ, M.frostBand, { collide: false, ao: 0 });
+    for (const x of [GX, 4.0, 5.4, 7.4, 9.4, 11.38]) box(x - 0.04, 0, GZ - 0.05, x + 0.04, GH, GZ + 0.05, M.dark, { collide: false, ao: 0 });
+    for (const z of [-33.0, -31.2]) box(GX - 0.05, 0, z - 0.04, GX + 0.05, GH, z + 0.04, M.dark, { collide: false, ao: 0 });
+    box(GX - 0.05, GH - 0.08, GZ - 0.06, 11.4, GH, GZ + 0.06, M.dark, { collide: false, ao: 0 });
+    box(GX - 0.06, GH - 0.08, -35, GX + 0.06, GH, GZ, M.dark, { collide: false, ao: 0 });
+    box(4.0, GH - 0.08, GZ - 0.06, 5.4, 3.3, GZ + 0.06, M.dark, { collide: false, ao: 0 }); // door header
+    textPanel((x, W, H) => {
+      x.fillStyle = '#0F1923'; x.fillRect(0, 0, W, H); x.fillStyle = '#ECE8E1'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.font = `${H * 0.5}px "Bebas Neue", Impact, sans-serif`; x.fillText('MEETING ROOM · "QUICK SYNC"', W / 2, H * 0.52);
+    }, 3.4, 0.4, [8.4, 2.45, GZ + 0.07], 0);
+    // boardroom table, chairs and a wall screen
+    box(5.6, 0.72, -33.4, 9.6, 0.78, -31.8, M.wood, { collide: false, outline: true });
+    box(6.0, 0, -32.9, 9.2, 0.72, -32.3, M.dark, { collide: false });
+    addSolid(5.6, 0, -33.4, 9.6, 0.78, -31.8);
+    for (const x of [6.3, 7.6, 8.9]) { chair(x, -34.05, 0); chair(x, -31.15, PI); }
+    chair(10.25, -32.6, -PI / 2);
+    box(6.5, 1.25, -35, 8.9, 2.65, -34.9, M.dark, { collide: false, outline: true });
+    const tv = logoPlane(ZYOIN_LOGO, { w: 2.1, h: 0.8, fallbackText: 'ZYOIN', emissive: 0.9 }); tv.position.set(7.7, 1.95, -34.88); scene.add(tv);
+    for (const [x, m] of [[6.2, M.red], [8.2, M.cream], [9.1, M.teal]]) mug(x, 0.78, -32.9, m);
+
+    // ── B SITE: SUMMIT HALL sponsor wall (west wall) ──
+    box(12.6, 0.2, -34.85, 12.72, 3.75, -28.25, M.dark, { collide: false, ao: 0 });
+    textPanel(drawSponsorWall, 6.4, 3.35, [12.74, 1.975, -31.55], PI / 2);
+    box(12.6, 3.75, -34.85, 12.8, 3.85, -28.25, M.barRed, { collide: false, ao: 0 });
+
+    // ── helpers ──
+    function monitor(x, y, z, ry) { // faces local +z
+      part(x, z, ry, 0, y + 0.01, -0.02, 0.24, 0.02, 0.16, M.dark);
+      part(x, z, ry, 0, y + 0.12, -0.06, 0.04, 0.22, 0.03, M.dark);
+      part(x, z, ry, 0, y + 0.42, -0.04, 0.66, 0.41, 0.04, M.dark);
+      part(x, z, ry, 0, y + 0.42, -0.017, 0.61, 0.36, 0.006, M.screen);
+      part(x, z, ry, 0, y + 0.012, 0.26, 0.44, 0.02, 0.14, M.chair); // keyboard
+    }
+    function chair(x, z, ry) { // seat faces local +z
+      part(x, z, ry, 0, 0.47, 0, 0.5, 0.08, 0.48, M.chair);
+      part(x, z, ry, 0, 0.82, -0.24, 0.46, 0.5, 0.06, M.chair);
+      part(x, z, ry, 0, 0.25, 0, 0.06, 0.42, 0.06, M.metal);
+      for (let k = 0; k < 5; k++) { const a = (k / 5) * PI * 2 + ry; mesh(new THREE.BoxGeometry(0.05, 0.04, 0.3), M.metal, { p: [x + Math.sin(a) * 0.15, 0.04, z + Math.cos(a) * 0.15], r: [0, a, 0] }); }
+      contactRound(x, z, 0.22, 0, 0.3, 0.6, 10);
+    }
+    // two desks facing each other across a fabric divider, with monitors, chairs and clutter
+    function deskPod(cx, cz) {
+      box(cx - 0.8, 0.72, cz - 0.8, cx + 0.8, 0.76, cz + 0.8, M.deskTop, { collide: false, outline: true });
+      for (const sx of [-0.77, 0.73]) box(cx + sx, 0, cz - 0.78, cx + sx + 0.04, 0.72, cz + 0.78, M.metal, { collide: false });
+      box(cx - 0.8, 0.76, cz - 0.02, cx + 0.8, 1.18, cz + 0.02, M.fabric, { collide: false, outline: true });
+      addSolid(cx - 0.8, 0, cz - 0.8, cx + 0.8, 0.76, cz + 0.8);
+      contact(cx - 0.8, cz - 0.8, cx + 0.8, cz + 0.8, 0, 0.5, 0.7);
+      monitor(cx - 0.1, 0.76, cz - 0.36, PI); monitor(cx + 0.15, 0.76, cz + 0.36, 0);
+      chair(cx - 0.1, cz - 1.25, 0); chair(cx + 0.2, cz + 1.25, PI + 0.35);
+      mug(cx + 0.55, 0.76, cz - 0.3, M.red); mug(cx - 0.55, 0.76, cz + 0.45, M.teal);
+      box(cx + 0.3, 0.76, cz + 0.25, cx + 0.6, 0.79, cz + 0.6, M.cream, { collide: false }); // notepad
+    }
+    function mug(x, y, z, mat) {
+      mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.11, 10), mat, { p: [x, y + 0.055, z] });
+      mesh(new THREE.TorusGeometry(0.03, 0.009, 5, 8, PI), mat, { p: [x + 0.05, y + 0.055, z], r: [0, 0, -PI / 2] });
+    }
+    function trophy(x, y, z, k) {
+      mesh(new THREE.BoxGeometry(0.22 * k, 0.1 * k, 0.22 * k), M.dark, { p: [x, y + 0.05 * k, z] });
+      mesh(new THREE.LatheGeometry([[0, 0], [0.07, 0], [0.03, 0.05], [0.025, 0.16], [0.06, 0.2], [0.11, 0.3], [0.12, 0.4], [0.0, 0.4]].map(([a, b]) => new THREE.Vector2(a * k, b * k)), 14), M.gold, { p: [x, y + 0.1 * k, z] });
+      for (const s of [-1, 1]) mesh(new THREE.TorusGeometry(0.05 * k, 0.012 * k, 5, 10, PI), M.gold, { p: [x, y + 0.42 * k, z + s * 0.11 * k], r: [0, PI / 2, s > 0 ? -PI / 2 : PI / 2] });
+    }
+  }
+  // A canvas-textured plane (signs, boards). draw(ctx, W, H); front faces +Z, then rotated by ry.
+  function textPanel(draw, w, h, pos, ry, { px = 300, emissive = 0, transparent = false } = {}) {
+    const c = document.createElement('canvas'); c.width = Math.min(2048, Math.round(px * w)); c.height = Math.min(1024, Math.round(px * h));
+    draw(c.getContext('2d'), c.width, c.height);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    const m = new THREE.MeshStandardMaterial({ map: t, roughness: 0.75, transparent, emissive: emissive ? 0xffffff : 0x000000, emissiveMap: emissive ? t : null, emissiveIntensity: emissive });
+    const p = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m); p.position.set(...pos); p.rotation.y = ry; p.receiveShadow = true;
+    p.matrixAutoUpdate = false; p.updateMatrix(); scene.add(p); return p;
+  }
+  function drawWhiteboard(x, W, H) {
+    const u = W / 840; x.fillStyle = '#fbfbf8'; x.fillRect(0, 0, W, H);
+    x.lineCap = 'round'; x.lineJoin = 'round';
+    const pen = (c, w) => { x.strokeStyle = c; x.fillStyle = c; x.lineWidth = w * u; };
+    const hand = (t, X, Y, size, c, rot = 0) => { x.save(); x.translate(X * u, Y * u); x.rotate(rot); x.fillStyle = c; x.font = `${size * u}px "Bebas Neue", Impact, sans-serif`; x.fillText(t, 0, 0); x.restore(); };
+    hand('Q4 PLAN (THE REAL ONE)', 30, 62, 50, '#1f4fb8', -0.02);
+    pen('#1f4fb8', 4); x.beginPath(); x.moveTo(30 * u, 74 * u); x.lineTo(380 * u, 70 * u); x.stroke();
+    // chart going up and to the right
+    pen('#222', 4); x.beginPath(); x.moveTo(50 * u, 110 * u); x.lineTo(50 * u, 330 * u); x.lineTo(400 * u, 330 * u); x.stroke();
+    pen('#1aa36b', 6); x.beginPath(); [[60, 310], [120, 290], [170, 300], [230, 240], [290, 220], [340, 150], [390, 118]].forEach(([a, b], i) => (i ? x.lineTo(a * u, b * u) : x.moveTo(a * u, b * u))); x.stroke();
+    hand('WOW!', 300, 105, 44, '#e0303f', 0.1); hand('SPONSORS ↑', 120, 370, 34, '#222');
+    // to-do list
+    hand('TO DO:', 460, 120, 38, '#222');
+    ['☑ CLOSE GCC SPONSORS', '☑ WIN WOW CHAMP', '☑ RESCUE THE CAT', '☐ SAY GOODBYE'].forEach((t, i) => hand(t, 470, 165 + i * 42, 30, i === 3 ? '#e0303f' : '#1f4fb8'));
+    pen('#e0303f', 4); x.beginPath(); x.moveTo(465 * u, 300 * u); x.lineTo(700 * u, 300 * u); x.stroke();
+    hand('(NOT YET)', 610, 330, 28, '#e0303f', -0.05);
+    // cat doodle
+    pen('#222', 4); const cx = 740, cy = 120; x.beginPath(); x.arc(cx * u, cy * u, 40 * u, 0, PI * 2); x.stroke();
+    x.beginPath(); x.moveTo((cx - 34) * u, (cy - 20) * u); x.lineTo((cx - 30) * u, (cy - 62) * u); x.lineTo((cx - 8) * u, (cy - 38) * u); x.moveTo((cx + 34) * u, (cy - 20) * u); x.lineTo((cx + 30) * u, (cy - 62) * u); x.lineTo((cx + 8) * u, (cy - 38) * u); x.stroke();
+    x.beginPath(); x.arc((cx - 14) * u, (cy - 6) * u, 4 * u, 0, 7); x.arc((cx + 14) * u, (cy - 6) * u, 4 * u, 0, 7); x.fill();
+    x.beginPath(); for (const s of [-1, 1]) for (const d of [-6, 6]) { x.moveTo((cx + s * 12) * u, (cy + 12) * u); x.lineTo((cx + s * 56) * u, (cy + 12 + d) * u); } x.stroke();
+    hand('SAVED BY C.', 680, 200, 30, '#222');
+    // heart + sign-off
+    pen('#e0303f', 5); x.beginPath(); const hx = 720, hy = 330; x.moveTo(hx * u, (hy + 30) * u); x.bezierCurveTo((hx - 60) * u, (hy - 10) * u, (hx - 20) * u, (hy - 50) * u, hx * u, (hy - 15) * u); x.bezierCurveTo((hx + 20) * u, (hy - 50) * u, (hx + 60) * u, (hy - 10) * u, hx * u, (hy + 30) * u); x.stroke();
+    hand('CHIKERO', 660, 400, 36, '#e0303f', -0.04);
+    // sticky notes
+    for (const [X, Y, c, t, r] of [[420, 360, '#ffe066', 'CHAI 4PM', -0.06], [250, 380, '#ffb3c7', 'BOOK VENUE', 0.05]]) {
+      x.save(); x.translate(X * u, Y * u); x.rotate(r); x.fillStyle = c; x.fillRect(0, 0, 130 * u, 46 * u); x.fillStyle = '#333'; x.font = `${22 * u}px "Bebas Neue", Impact, sans-serif`; x.fillText(t, 10 * u, 31 * u); x.restore();
+    }
+  }
+  function drawNoticeBoard(x, W, H) {
+    const u = W / 900; x.fillStyle = '#b4875a'; x.fillRect(0, 0, W, H);
+    for (let i = 0; i < 2200; i++) { x.fillStyle = Math.random() < 0.5 ? 'rgba(80,50,25,0.25)' : 'rgba(240,210,170,0.2)'; x.fillRect(Math.random() * W, Math.random() * H, 2 * u, 2 * u); }
+    const note = (X, Y, w, h, bg, r, lines, pin = '#FF4655') => {
+      x.save(); x.translate(X * u, Y * u); x.rotate(r);
+      x.fillStyle = 'rgba(0,0,0,0.25)'; x.fillRect(4 * u, 5 * u, w * u, h * u); x.fillStyle = bg; x.fillRect(0, 0, w * u, h * u);
+      x.fillStyle = '#1b2733'; lines.forEach(([t, s, f], i) => { x.font = `${f || ''} ${s * u}px ${f ? 'Inter, sans-serif' : '"Bebas Neue", Impact, sans-serif'}`; x.fillText(t, 12 * u, (16 + s + lines.slice(0, i).reduce((a, l) => a + l[1] * 1.15, 0)) * u, (w - 20) * u); });
+      x.fillStyle = pin; x.beginPath(); x.arc((w / 2) * u, 8 * u, 7 * u, 0, 7); x.fill(); x.restore();
+    };
+    note(24, 24, 230, 150, '#fff6c9', -0.04, [['WOW CHAMP', 44], ['Congrats Chikero!', 20, 700], ['The only marketer to', 16, 500], ['ever win it.', 16, 500]]);
+    note(280, 30, 210, 120, '#ECE8E1', 0.03, [['GCC SUMMIT', 40], ['Sponsors: CONFIRMED ✓', 16, 700], ['Lanyards: 300', 16, 500]], '#2F8F88');
+    note(30, 205, 220, 180, '#d9f2ee', 0.05, [['PANTRY RULES', 36], ['1. Label your food', 16, 500], ['2. Chai > coffee', 16, 500], ['3. No cats on the', 16, 500], ['    counter*', 16, 500], ['*rescues excepted', 14, 700]], '#FFC21A');
+    note(275, 175, 230, 120, '#ffd6dc', -0.05, [['FAREWELL CAKE', 38], ['Friday · 4 PM · Pantry', 16, 700]]);
+    note(290, 315, 200, 95, '#fff', 0.04, [['LOST: 1 SCARED CAT', 22, 700], ['FOUND: top of cabinet', 15, 500]]);
+  }
+  function drawSponsorWall(x, W, H) {
+    x.fillStyle = '#0F1923'; x.fillRect(0, 0, W, H);
+    const cols = 4, rows = 5, cw = W / cols, rh = H / rows;
+    const names = [['ZYOIN', '#FF4655'], ['GCC SUMMIT 2026', '#ECE8E1'], ['ZYOIN', '#FF4655'], ['PARTNERSHIPS', '#FFC21A']];
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const [t, col] = names[(c + r * 2) % names.length]; const big = t === 'ZYOIN';
+      x.fillStyle = col; x.font = `${rh * (big ? 0.62 : 0.34)}px "Bebas Neue", Impact, sans-serif`;
+      x.fillText(t, (c + 0.5 + (r % 2) * 0.5 - (r % 2 && c === cols - 1 ? cols : 0)) * cw, (r + 0.5) * rh, cw * 0.9);
+    }
+    x.strokeStyle = 'rgba(236,232,225,0.08)'; x.lineWidth = 2; for (let r = 1; r < rows; r++) { x.beginPath(); x.moveTo(0, r * rh); x.lineTo(W, r * rh); x.stroke(); }
+  }
+
+  // ── framed photos (MAP_PHOTOS.zyoin) ──────────────────────────────────────
+  // Slots are grouped by place; each photo is routed by keywords in its src/caption (cat-rescue
+  // → The Pantry, polaroids → the notice board, summit/event → Summit Hall, desk → the office,
+  // everything else → the reception photo wall), then matched to a landscape or portrait slot
+  // once its aspect ratio is known. Overflow spills to the next group, then to the corridors.
+  // Frames are created when the image has loaded, and only while this map is still live.
+  function hangPhotos(list) {
+    const W = (z, y, o, w, h, cap = true) => ({ p: [-11.96, y, z], ry: PI / 2, o, w, h, cap });
+    const groups = {
+      pantry: [[-44.96, 2.25, -20.65], [-44.96, 2.25, -19.4], [-44.96, 2.25, -18.15]].map((p) => ({ p, ry: PI / 2, o: 'P', w: 0.78, h: 1.04, cap: true })),
+      board: [{ p: [-44.86, 1.98, -13.78], ry: PI / 2, o: 'P', w: 0.56, h: 1.2, cap: false, depth: 0.02 }],
+      summit: [
+        { p: [44.96, 2.85, -32.75], ry: -PI / 2, o: 'P', w: 1.15, h: 1.55, cap: true },
+        { p: [44.96, 2.2, -19.25], ry: -PI / 2, o: 'P', w: 1.1, h: 1.5, cap: true },
+        { p: [44.96, 2.05, -14.75], ry: -PI / 2, o: 'L', w: 1.8, h: 1.2, cap: true },
+        { p: [23.9, 2.2, -8.04], ry: PI, o: 'L', w: 1.6, h: 1.1, cap: true },
+      ],
+      office: [{ p: [-11.36, 2.05, -29.6], ry: PI / 2, o: 'L', w: 1.55, h: 1.05, cap: true }],
+      wall: [W(28.55, 2.35, 'L', 1.75, 1.2), W(32.65, 2.35, 'L', 1.75, 1.2), W(30.6, 2.5, 'P', 1.15, 1.75), W(30.6, 4.75, 'P', 0.95, 1.2), W(28.55, 4.45, 'L', 1.4, 0.95), W(32.65, 4.45, 'L', 1.4, 0.95)],
+      corridor: [
+        { p: [-22, 1.95, 2.04], ry: 0, o: 'L', w: 1.3, h: 0.9, cap: true }, { p: [21, 1.95, 2.04], ry: 0, o: 'L', w: 1.3, h: 0.9, cap: true },
+        { p: [-15, 1.95, 5.96], ry: PI, o: 'L', w: 1.3, h: 0.9, cap: true }, { p: [17.4, 1.95, 5.96], ry: PI, o: 'L', w: 1.3, h: 0.9, cap: true },
+      ],
+    };
+    const order = ['pantry', 'board', 'summit', 'office', 'wall', 'corridor'];
+    const route = (ph) => { const k = `${ph.src} ${ph.caption || ''}`.toLowerCase(); return /cat/.test(k) ? 'pantry' : /polaroid|pinned/.test(k) ? 'board' : /summit|lobby|lanyard|hpe|stage|sponsor|event/.test(k) ? 'summit' : /desk/.test(k) ? 'office' : 'wall'; };
+    let pending = list.length; const loaded = [];
+    const place = () => {
+      if (!sceneAlive()) return;
+      const queue = Object.fromEntries(order.map((g) => [g, []]));
+      loaded.forEach((ph) => queue[route(ph)].push(ph));
+      order.forEach((g, gi) => {
+        const free = groups[g].slice();
+        for (const ph of queue[g]) {
+          const want = ph.aspect >= 1.1 ? 'L' : 'P';
+          let i = free.findIndex((s) => s.o === want); if (i < 0) i = free.findIndex(() => true);
+          if (i < 0) { if (gi + 1 < order.length) queue[order[g === 'wall' ? gi + 1 : order.indexOf('wall') > gi ? order.indexOf('wall') : gi + 1]].push(ph); continue; }
+          const s = free.splice(i, 1)[0];
+          let w = s.w, h = s.h; if (ph.aspect > w / h) h = w / ph.aspect; else w = h * ph.aspect;
+          const f = photoFrame(ph.src, { w, h, caption: s.cap ? ph.caption : '', frame: g === 'board' ? 0xf4f1ea : 0x1a2530, depth: s.depth || 0.06 });
+          f.position.set(...s.p); f.rotation.y = s.ry;
+          f.traverse((o) => { o.castShadow = false; o.receiveShadow = false; });
+          scene.add(f);
+        }
+      });
+    };
+    if (!pending) return;
+    list.forEach((ph, idx) => loadPhoto(ph.src, (tex, aspect) => {
+      loaded[idx] = { ...ph, aspect }; // keep config order
+      if (--pending === 0) { for (let k = loaded.length - 1; k >= 0; k--) if (!loaded[k]) loaded.splice(k, 1); place(); }
+    }, ph.caption));
+  }
+  // true while this map is being built or is in the scene (not after it has been unloaded)
+  function sceneAlive() { return !built || !!scene.parent; }
+
   // ── navigation ────────────────────────────────────────────────────────────
   const nodes = {
     S0: [0, 30], P0: [0, 21], PW: [-35, 21], PE: [35, 21], MS: [0, 13],
@@ -1062,11 +1284,14 @@ function ledTexture() {
   const c = document.createElement('canvas'); c.width = 1024; c.height = 308; const x = c.getContext('2d');
   const g = x.createLinearGradient(0, 0, 1024, 308); g.addColorStop(0, '#0F1923'); g.addColorStop(1, '#1c3a52');
   x.fillStyle = g; x.fillRect(0, 0, 1024, 308);
-  x.strokeStyle = 'rgba(64,224,255,0.35)'; x.lineWidth = 2;
-  for (let i = 0; i < 12; i++) { x.beginPath(); x.arc(860, 150, 20 + i * 18, 0, 6.3); x.stroke(); }
-  x.fillStyle = '#ECE8E1'; x.font = '120px "Bebas Neue", Impact, sans-serif'; x.textBaseline = 'middle'; x.fillText('GCC SUMMIT', 50, 120);
-  x.fillStyle = '#FF4655'; x.font = '700 30px Inter, sans-serif'; x.fillText('PARTNERSHIPS · SPONSORS · BIG ENERGY', 54, 205);
-  x.fillStyle = '#FFC21A'; x.font = '700 22px Inter, sans-serif'; x.fillText('HEADLINE PARTNER LEAD: CHIKERO', 54, 250);
+  x.strokeStyle = 'rgba(64,224,255,0.3)'; x.lineWidth = 2;
+  for (let i = 0; i < 12; i++) { x.beginPath(); x.arc(150, 154, 30 + i * 18, 0, 6.3); x.stroke(); }
+  x.fillStyle = 'rgba(15,25,35,0.75)'; x.fillRect(0, 0, 380, 308); // the ZYOIN logo sits on this panel
+  x.fillStyle = '#FF4655'; x.fillRect(380, 40, 4, 228);
+  x.textBaseline = 'middle';
+  x.fillStyle = '#ECE8E1'; x.font = '120px "Bebas Neue", Impact, sans-serif'; x.fillText('GCC SUMMIT', 420, 116);
+  x.fillStyle = '#FF4655'; x.font = '700 26px Inter, sans-serif'; x.fillText('PARTNERSHIPS · SPONSORS · BIG ENERGY', 424, 200);
+  x.fillStyle = '#FFC21A'; x.font = '700 20px Inter, sans-serif'; x.fillText('HEADLINE PARTNER LEAD: CHIKERO', 424, 246);
   for (let i = 0; i < 1024; i += 4) { x.fillStyle = 'rgba(0,0,0,0.18)'; x.fillRect(i, 0, 1, 308); }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
