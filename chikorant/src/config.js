@@ -74,3 +74,52 @@ export function buildRoundList() {
   list.push({ ...FINAL_ROUND, final: true, index: list.length, note: null });
   return list;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  MAPS, PHOTOS, SLIDESHOW
+//
+//  Photos: drop .jpg/.png files into  public/p/  and list them below.
+//  A missing file never breaks anything: it shows a styled placeholder instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Zyoin logo (PNG with transparency works best). Missing file → text logo.
+export const ZYOIN_LOGO = 'p/zyoin-logo.png';
+
+// Maps she can pick on the map-select screen. `id` must match a builder in src/maps/.
+export const MAPS = [
+  { id: 'zyoin', name: 'ZYOIN HQ', sub: 'The office. Pantry raids, summit season, beige walls she refused to be.', tag: 'OFFICE' },
+  { id: 'garba', name: 'GARBA NIGHT', sub: 'Festival grounds. Lights, dandiya, dancing without knowing a single step.', tag: 'FESTIVAL' },
+];
+
+// Framed photos hung around each map (walls, notice boards, stage screens).
+export const MAP_PHOTOS = {
+  zyoin: [
+    { src: 'm/chikero.jpg', caption: 'Day one. "Too much." Exactly enough.' },
+    { src: 'm/berry.jpg', caption: 'Berry + Chikero' },
+    { src: 'm/tandon.jpg', caption: 'Partners in partnerships' },
+    // { src: 'p/office-1.jpg', caption: 'GCC Summit, backstage' },
+    // { src: 'p/wow-champ.jpg', caption: 'The only marketer to ever win WOW Champ' },
+  ],
+  garba: [
+    { src: 'm/chikero.jpg', caption: 'Garba queen (no steps required)' },
+    { src: 'm/berry.jpg', caption: 'Dandiya partners' },
+    { src: 'm/tandon.jpg', caption: 'All night. Every night.' },
+    // { src: 'p/garba-1.jpg', caption: 'Navratri 2025' },
+  ],
+};
+
+// Post-game slideshow (after the final round, before the GG screen).
+// `music`: optional mp3 you add yourself; without it an original piano score is generated.
+export const SLIDESHOW = {
+  music: 'music/ending.mp3',
+  slides: [
+    { src: 'm/chikero.jpg', title: 'Chikero', caption: 'They called her "too much" for our dry little office.' },
+    { src: 'm/chikero.jpg', title: 'Turns out', caption: 'she was exactly what it needed.' },
+    { src: 'm/berry.jpg', title: 'Berry', caption: 'First blood. First friend. First voice note.' },
+    { src: 'm/tandon.jpg', title: 'Tandon', caption: 'Partnerships secured. Accomplice for life.' },
+    { src: 'm/chikero.jpg', title: 'Barefoot on the counter', caption: 'for a scared cat. Of course she did.' },
+    { src: 'm/chikero.jpg', title: 'Garba night', caption: "Didn't know a single step. Danced till the lights went out." },
+    { src: 'm/chikero.jpg', title: 'Abu Dhabi', caption: 'gets its girl back.' },
+    { src: 'm/chikero.jpg', title: 'Bangalore', caption: 'keeps the light on for you.' },
+  ],
+};
