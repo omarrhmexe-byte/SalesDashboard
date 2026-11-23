@@ -51,6 +51,10 @@ Then add this DNS record at the DNS host for `1597.in`:
 |-------|-----------|------------------------|
 | CNAME | `chikero` | `cname.vercel-dns.com` |
 
+`1597.in` uses Cloudflare DNS, so set the record to **DNS only** (grey cloud) so Vercel can issue the SSL certificate. Vercel also accepts its project-specific target `4083706a3192fd7b.vercel-dns-017.com` in place of `cname.vercel-dns.com`.
+
+Live project: Vercel project `chikorant` (production alias `chikorant.vercel.app`, which sits behind Vercel login; the custom domain is public).
+
 The game is served at the root URL, so the printed QR code can point straight at `https://chikero.1597.in/`.
 
 ## Code map
