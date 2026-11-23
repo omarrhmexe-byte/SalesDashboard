@@ -767,8 +767,19 @@ export class Game {
   showEnd() {
     this.state = 'end'; this.input.unlock(); this.input.enabled = false; this.bannerShown = false;
     UI.show('card', false); UI.show('pause', false); UI.stopNote();
-    UI.show('hud', false); UI.show('touch', false);
-    UI.showEnding(() => { this.score = { me: 0, them: 0 }; this.carryUlt = 0; UI.show('hud'); if (this.mobile) UI.show('touch'); this.input.enabled = true; this.input.lock(); this.startRound(0); });
+    UI.show('hud', false); UI.show('touch', false); UI.hideBanner();
+    const again = () => { this.score = { me: 0, them: 0 }; this.carryUlt = 0; UI.show('hud'); if (this.mobile) UI.show('touch'); this.input.enabled = true; this.input.lock(); this.startRound(0); };
+    // the post-game film plays first; the GG screen comes after it (and can replay it)
+    const toEnding = () => UI.showEnding(again, () => { UI.show('ending', false); film(); });
+    const film = () => import('./slideshow.js').then(({ playSlideshow }) => {
+      if (this.state !== 'end') return;
+      this.fwT = 1e9; // let the last fireworks burn out as the film fades in
+      this.film = playSlideshow({
+        onOpaque: () => { this.render = () => {}; }, // the 3D scene is fully covered: stop drawing it
+        onDone: () => { delete this.render; this.fwT = 0; this.film = null; if (this.state === 'end') toEnding(); },
+      });
+    }).catch(() => { document.querySelectorAll('.film').forEach((e) => e.remove()); if (this.state === 'end') toEnding(); }); // never lose the GG screen
+    film();
   }
   endUpdate(dt) {
     // keep the celebration going behind the ending screen

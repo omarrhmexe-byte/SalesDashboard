@@ -156,7 +156,7 @@ addEventListener('keydown', (e) => { if (!$('dead').hidden && (e.code === 'Enter
 
 // ── ending ──────────────────────────────────────────────────────────────────
 let endAudio = null;
-export function showEnding(onAgain) {
+export function showEnding(onAgain, onReplay) {
   $('endImg').src = PORTRAIT;
   $('endLines').innerHTML = ENDING.lines.map((l, i) => `<div style="animation-delay:${0.6 + i * 0.55}s">${l}</div>`).join('');
   $('xoxo').textContent = ENDING.signoff; $('xoxo').style.animationDelay = `${0.6 + ENDING.lines.length * 0.55 + 0.3}s`;
@@ -172,6 +172,15 @@ export function showEnding(onAgain) {
     endAudio = new Audio(n.audio); endAudio.play().catch(() => {}); duck(true); b.classList.add('on');
     endAudio.onended = () => { b.classList.remove('on'); duck(false); };
   }));
+  const stopEndAudio = () => { if (endAudio) { endAudio.pause(); endAudio = null; } notes.querySelectorAll('button').forEach((x) => x.classList.remove('on')); duck(false); };
+  let replay = $('replayBtn');
+  if (!replay) {
+    replay = document.createElement('button'); replay.id = 'replayBtn'; replay.className = 'btn ghost replayBtn'; replay.textContent = 'REPLAY THE FILM';
+    $('againBtn').insertAdjacentElement('afterend', replay);
+    replay.addEventListener('mouseenter', () => sfx.hover());
+  }
+  replay.hidden = !onReplay;
+  replay.onclick = () => { sfx.click(); stopEndAudio(); onReplay(); };
   show('ending');
-  $('againBtn').onclick = () => { sfx.click(); if (endAudio) { endAudio.pause(); endAudio = null; } duck(false); show('ending', false); onAgain(); };
+  $('againBtn').onclick = () => { sfx.click(); stopEndAudio(); show('ending', false); onAgain(); };
 }
