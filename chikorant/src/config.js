@@ -11,8 +11,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const VOICE_NOTES = [
-  { from: 'Berry',  photo: 'm/berry.jpg',  audio: 'vm/berry.mp3',  line: 'First blood. Berry has something to say.' },
-  { from: 'Tandon', photo: 'm/tandon.jpg', audio: 'vm/tandon.mp3', line: 'Partnerships, secured. Your accomplice checks in.' },
+  { from: 'Berry',  photo: 'p/06-crew/berry-and-maria-car.jpg',  audio: 'vm/berry.mp3',  line: 'First blood. Berry has something to say.' },
+  { from: 'Tandon', photo: 'p/02-office-gcc/hpe-mirror-selfie.jpg', audio: 'vm/tandon.mp3', line: 'Partnerships, secured. Your accomplice checks in.' },
   // { from: 'Name', photo: 'm/name.jpg', audio: 'vm/name.mp3', line: 'Danced like nobody was watching. Name checks in.' },
 ];
 
@@ -92,34 +92,66 @@ export const MAPS = [
 ];
 
 // Framed photos hung around each map (walls, notice boards, stage screens).
+const P = (f) => `p/${f}.jpg`;
 export const MAP_PHOTOS = {
   zyoin: [
-    { src: 'm/chikero.jpg', caption: 'Day one. "Too much." Exactly enough.' },
-    { src: 'm/berry.jpg', caption: 'Berry + Chikero' },
-    { src: 'm/tandon.jpg', caption: 'Partners in partnerships' },
-    // { src: 'p/office-1.jpg', caption: 'GCC Summit, backstage' },
-    // { src: 'p/wow-champ.jpg', caption: 'The only marketer to ever win WOW Champ' },
+    { src: P('01-early/conference-table-laugh'), caption: 'Day one. Already the loudest laugh' },
+    { src: P('02-office-gcc/meeting-room-trio'), caption: 'Meeting room, main character' },
+    { src: P('02-office-gcc/tech-summit-sculpture'), caption: 'Summit season' },
+    { src: P('02-office-gcc/conference-lobby-talk'), caption: 'Closing sponsors in the lobby' },
+    { src: P('02-office-gcc/office-selfie-green-jersey'), caption: 'Desk neighbours' },
+    { src: P('01-early/office-formals-bench'), caption: 'Formals. Briefly.' },
+    { src: P('02-office-gcc/lanyard-palm-selfie'), caption: 'Lanyards + palms' },
+    { src: P('02-office-gcc/hpe-mirror-wide'), caption: 'Event-hotel mirror tradition' },
+    { src: P('02-office-gcc/white-waistcoat-portrait'), caption: 'Partnerships lead energy' },
+    { src: P('03-cat-rescue/kitchen-counter-1'), caption: 'The cat rescue (1/3)' },
+    { src: P('03-cat-rescue/kitchen-counter-2'), caption: 'The cat rescue (2/3)' },
+    { src: P('03-cat-rescue/kitchen-counter-wide'), caption: 'The cat rescue (3/3)' },
+    { src: P('01-early/polaroids-two'), caption: 'Pinned to the board forever' },
   ],
   garba: [
-    { src: 'm/chikero.jpg', caption: 'Garba queen (no steps required)' },
-    { src: 'm/berry.jpg', caption: 'Dandiya partners' },
-    { src: 'm/tandon.jpg', caption: 'All night. Every night.' },
-    // { src: 'p/garba-1.jpg', caption: 'Navratri 2025' },
+    { src: P('04-garba/navratri-big-group'), caption: 'Navratri, the whole gang' },
+    { src: P('04-garba/navratri-five'), caption: 'Dressed for the circle' },
+    { src: P('04-garba/navratri-selfie-faces'), caption: 'Zero steps known. Full commitment' },
+    { src: P('06-crew/leaf-wall-crowns-1'), caption: 'Crowned' },
+    { src: P('06-crew/leaf-wall-crowns-2'), caption: 'Rock on' },
+    { src: P('07-nights/booth-group-hug'), caption: 'The crew' },
+    { src: P('07-nights/night-stairs-group'), caption: 'One more song' },
+    { src: P('07-nights/bandana-bar-selfie'), caption: 'Bandana night' },
+    { src: P('07-nights/beer-poster-booth'), caption: 'Booth regulars' },
+    { src: P('05-tandon/photobooth-strip'), caption: 'Photobooth, 14.08' },
+    { src: P('05-tandon/halloween-interview-flash'), caption: 'Live from Halloween' },
+    { src: P('05-tandon/sofa-film-laugh'), caption: 'Sofa, film, bread' },
+    { src: P('06-crew/berry-and-maria-car'), caption: 'Back seat besties' },
+    { src: P('06-crew/bows-selfie'), caption: 'Bows on' },
+    { src: P('05-tandon/saree-mirror'), caption: 'Saree mirror check' },
+    { src: P('06-crew/car-selfie-3'), caption: 'Peace from the back seat' },
   ],
 };
 
-// Post-game slideshow (after the final round, before the GG screen).
+// Post-game film (after the final round, before the GG screen). Story order.
+// Each slide: { src, title, caption } or { video, title, caption }.
 // `music`: optional mp3 you add yourself; without it an original piano score is generated.
 export const SLIDESHOW = {
   music: 'music/ending.mp3',
   slides: [
-    { src: 'm/chikero.jpg', title: 'Chikero', caption: 'They called her "too much" for our dry little office.' },
-    { src: 'm/chikero.jpg', title: 'Turns out', caption: 'she was exactly what it needed.' },
-    { src: 'm/berry.jpg', title: 'Berry', caption: 'First blood. First friend. First voice note.' },
-    { src: 'm/tandon.jpg', title: 'Tandon', caption: 'Partnerships secured. Accomplice for life.' },
-    { src: 'm/chikero.jpg', title: 'Barefoot on the counter', caption: 'for a scared cat. Of course she did.' },
-    { src: 'm/chikero.jpg', title: 'Garba night', caption: "Didn't know a single step. Danced till the lights went out." },
-    { src: 'm/chikero.jpg', title: 'Abu Dhabi', caption: 'gets its girl back.' },
-    { src: 'm/chikero.jpg', title: 'Bangalore', caption: 'keeps the light on for you.' },
+    { src: P('01-early/charminar-night-with-friend'), title: 'Before all this', caption: 'A girl, a city at night, and no idea what was coming.' },
+    { src: P('01-early/conference-table-laugh'), title: 'Zyoin, day one', caption: 'Too loud for our beige little office. We were told she was "too much".' },
+    { src: P('02-office-gcc/meeting-room-trio'), title: 'Turns out', caption: 'she was exactly what the place was missing.' },
+    { src: P('02-office-gcc/tech-summit-sculpture'), title: 'Summit season', caption: 'Most sponsors on record. Biggest GCC events in the country. Casually.' },
+    { src: P('02-office-gcc/hpe-mirror-tongues'), title: 'Every event hotel', caption: 'got the same mirror selfie. Tradition is tradition.' },
+    { src: P('03-cat-rescue/kitchen-counter-2'), title: 'Barefoot on the counter', caption: 'because a cat was scared. Of course she climbed.' },
+    { src: P('04-garba/navratri-big-group'), title: 'Garba night', caption: "Didn't know a single step. Danced till they turned the lights off." },
+    { src: P('06-crew/berry-and-maria-car'), title: 'Berry', caption: 'Back seats, loud songs, louder opinions.' },
+    { src: P('05-tandon/photobooth-strip'), title: 'Tandon', caption: 'Four frames, one friendship, zero serious faces.' },
+    { src: P('05-tandon/halloween-interview-film'), title: 'Breaking news', caption: 'Local legend interviewed. Refuses to be normal.' },
+    { src: P('06-crew/leaf-wall-crowns-1'), title: 'The crew', caption: 'Leaf crowns were never optional.' },
+    { video: 'v/clip-1.mp4', title: 'Nights like these', caption: '' },
+    { src: P('07-nights/booth-group-hug'), title: '', caption: 'The booth, the hug, the noise.' },
+    { video: 'v/clip-2.mp4', title: '', caption: 'We were there for all of it.' },
+    { src: P('05-tandon/sofa-film-laugh'), title: 'The quiet ones too', caption: 'Sofa, film camera, bread. Perfect days.' },
+    { src: P('08-maria-solo/park'), title: 'Abu Dhabi', caption: 'gets its girl back.' },
+    { src: P('08-maria-solo/leaf-crown-laugh'), title: 'Bangalore', caption: 'keeps the light on for you.' },
+    { src: P('08-maria-solo/leaf-crown-portrait'), title: 'Happy birthday, Chikero', caption: "Not goodbye. Just see you later. You know you'll miss us." },
   ],
 };
