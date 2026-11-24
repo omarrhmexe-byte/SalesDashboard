@@ -53,6 +53,7 @@
 .msCard.picked::after { box-shadow: inset 0 0 0 3px var(--gold), inset 0 -120px 120px -60px rgba(255,194,26,.18); }
 .msCard.picked .msC { opacity: 1; transform: none; }
 .msCard.picked .msCheck { transform: none; }
+.msIdx { transition: opacity .2s; } .msCard.picked .msIdx { opacity: 0; }
 .msCard.picked .msArt { transform: scale(1.06); }
 .haspick .msCard:not(.picked):not(:hover) { filter: brightness(.6) saturate(.7); }
 

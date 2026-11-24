@@ -9,7 +9,7 @@ import { addSolid } from '../physics.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as T from '../textures.js';
 import { photoFrame, logoPlane, loadPhoto } from '../photos.js';
-import { ZYOIN_LOGO, MAP_PHOTOS } from '../config.js';
+import { ZYOIN_LOGO, ZYOIN_LOGO_LIGHT, MAP_PHOTOS } from '../config.js';
 
 const PI = Math.PI;
 
@@ -94,6 +94,7 @@ export function buildZyoinMap(scene, { quality } = {}) {
   const WA = T.wearAtlas(); const wearMat = new THREE.MeshStandardMaterial({ map: WA.tex, transparent: true, depthWrite: false, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); wearMat.userData.noShadow = true;
   const PA = T.posterAtlas(); const posterMat = new THREE.MeshStandardMaterial({ map: PA.tex, roughness: 0.85 }); posterMat.userData.noShadow = true;
   const dyn = { anim: [], signs: [] };
+  let built = false; // set once the map is returned; late photo loads check it (see sceneAlive)
 
   // ── floors ────────────────────────────────────────────────────────────────
   const floor = (x0, z0, x1, z1, mat, uv = 3) => box(x0, -0.4, z0, x1, 0, z1, mat, { collide: false, uv, ao: 0 });
@@ -376,8 +377,8 @@ export function buildZyoinMap(scene, { quality } = {}) {
   // LED wall screen
   const led = new THREE.Mesh(new THREE.PlaneGeometry(14.6, 4.4), new THREE.MeshBasicMaterial({ map: ledTexture(), toneMapped: true }));
   led.material.color.setScalar(1.15); led.position.set(33.5, 3.3, -34.38); scene.add(led); dyn.led = led;
-  const ledLogo = logoPlane(ZYOIN_LOGO, { w: 4.8, h: 1.7, fallbackText: 'ZYOIN', color: '#FF4655', emissive: 1.1 });
-  ledLogo.position.set(29.0, 3.55, -34.34); ledLogo.renderOrder = 2; scene.add(ledLogo);
+  const ledLogo = logoPlane(ZYOIN_LOGO_LIGHT, { w: 4.8, h: 1.5, fallbackText: 'ZYOIN', color: '#FF4655', emissive: 0.85 });
+  ledLogo.position.set(29.0, 3.3, -34.34); ledLogo.renderOrder = 2; scene.add(ledLogo);
 
   // ── signs ─────────────────────────────────────────────────────────────────
   sign('GCC SUMMIT', '#40e0ff', [33.5, 6.6, -34.9], 0, 11, { hdr: 1.8, sub: 'INDIA · 2026', subColor: '#ffc21a' });
@@ -582,7 +583,6 @@ export function buildZyoinMap(scene, { quality } = {}) {
   cascade('z', 9, 13.2, 16, -1, 7.5, { drop: 3.4, n: 34 }); cascade('x', 16, 9, 13, 1, 7.5, { drop: 3.0, n: 26 });
   cascade('z', -9, -8, -5.4, 1, 7.5, { drop: 2.6, n: 22 }); cascade('z', 9, -8, -5.4, -1, 7.5, { drop: 2.6, n: 22 });
   cascade('z', -45, 17, 23, 1, 8.5, { drop: 4.2, n: 44 }); cascade('z', 45, 19, 25, -1, 8.5, { drop: 4.2, n: 44 });
-  cascade('z', -12, 27, 31, 1, 7, { drop: 3.2, n: 30 }); cascade('z', 12, 27, 31, -1, 7, { drop: 3.2, n: 30 });
   cascade('z', -11.4, -35, -31.5, 1, 7, { drop: 3.5, n: 30 }); cascade('z', 11.4, -35, -31.5, -1, 7, { drop: 3.5, n: 30 });
   cascade('z', -12.6, -16, -13, -1, 7, { drop: 3.0, n: 24 }); cascade('z', 12.6, -11, -8, 1, 7, { drop: 3.0, n: 24 });
   cascade('z', 45, -35, -31, -1, 8.5, { drop: 3.4, n: 30, leafy: 0.75 }); cascade('z', -45, -14, -9, 1, 8.5, { drop: 3.8, n: 32, leafy: 0.8 });
@@ -963,7 +963,7 @@ export function buildZyoinMap(scene, { quality } = {}) {
     // logo wall behind the desk
     box(-4.7, 2.9, 34.82, 4.7, 5.9, 35, M.dark, { collide: false, ao: 0 });
     box(-4.7, 2.82, 34.78, 4.7, 2.9, 35, M.barRed, { collide: false, ao: 0 });
-    const recLogo = logoPlane(ZYOIN_LOGO, { w: 8, h: 2.3, fallbackText: 'ZYOIN', emissive: 0.7 });
+    const recLogo = logoPlane(ZYOIN_LOGO_LIGHT, { w: 8, h: 2.5, fallbackText: 'ZYOIN', emissive: 0.5 });
     recLogo.position.set(0, 4.45, 34.8); recLogo.rotation.y = PI; scene.add(recLogo);
     // desk: navy body, red kick strip, pale counter, monitor, bell, a little plant
     box(-3.4, 0, 32.95, 3.4, 1.0, 34.0, M.navy, { outline: true, uv: 1.5, ao: 1 });
@@ -982,9 +982,8 @@ export function buildZyoinMap(scene, { quality } = {}) {
       x.fillStyle = '#FF4655'; x.font = `700 ${H * 0.13}px Inter, sans-serif`; x.fillText('BANGALORE · PLEASE SIGN THE VISITOR BOOK', W / 2, H * 0.78);
     }, 5.2, 0.62, [0, 0.62, 32.93], PI);
     // gate lintel: logo facing the spawn
-    box(-3.3, 5.25, 26.6, 3.3, 6.85, 26.68, M.dark, { collide: false, ao: 0 });
-    const gateLogo = logoPlane(ZYOIN_LOGO, { w: 5.8, h: 1.45, fallbackText: 'ZYOIN HQ', emissive: 0.9 });
-    gateLogo.position.set(0, 6.05, 26.7); scene.add(gateLogo);
+    const gateLogo = logoPlane(ZYOIN_LOGO, { w: 5.6, h: 1.75, fallbackText: 'ZYOIN HQ', emissive: 0.12 });
+    gateLogo.position.set(0, 6.0, 26.62); scene.add(gateLogo);
     // lobby sofas in the back corners (where the crates used to be)
     for (const [x0, x1] of [[-11.7, -8.3], [8.3, 11.7]]) {
       box(x0, 0, 33.7, x1, 0.45, 34.95, M.red, { outline: true, uv: 1.2 });
@@ -1055,13 +1054,15 @@ export function buildZyoinMap(scene, { quality } = {}) {
     for (const x of [6.3, 7.6, 8.9]) { chair(x, -34.05, 0); chair(x, -31.15, PI); }
     chair(10.25, -32.6, -PI / 2);
     box(6.5, 1.25, -35, 8.9, 2.65, -34.9, M.dark, { collide: false, outline: true });
-    const tv = logoPlane(ZYOIN_LOGO, { w: 2.1, h: 0.8, fallbackText: 'ZYOIN', emissive: 0.9 }); tv.position.set(7.7, 1.95, -34.88); scene.add(tv);
+    const tv = logoPlane(ZYOIN_LOGO_LIGHT, { w: 2.1, h: 0.66, fallbackText: 'ZYOIN', emissive: 0.7 }); tv.position.set(7.7, 1.95, -34.88); scene.add(tv);
     for (const [x, m] of [[6.2, M.red], [8.2, M.cream], [9.1, M.teal]]) mug(x, 0.78, -32.9, m);
 
     // ── B SITE: SUMMIT HALL sponsor wall (west wall) ──
     box(12.6, 0.2, -34.85, 12.72, 3.75, -28.25, M.dark, { collide: false, ao: 0 });
     textPanel(drawSponsorWall, 6.4, 3.35, [12.74, 1.975, -31.55], PI / 2);
     box(12.6, 3.75, -34.85, 12.8, 3.85, -28.25, M.barRed, { collide: false, ao: 0 });
+
+    hangPhotos(MAP_PHOTOS.zyoin || []);
 
     // ── helpers ──
     function monitor(x, y, z, ry) { // faces local +z
@@ -1176,16 +1177,16 @@ export function buildZyoinMap(scene, { quality } = {}) {
   function hangPhotos(list) {
     const W = (z, y, o, w, h, cap = true) => ({ p: [-11.96, y, z], ry: PI / 2, o, w, h, cap });
     const groups = {
-      pantry: [[-44.96, 2.25, -20.65], [-44.96, 2.25, -19.4], [-44.96, 2.25, -18.15]].map((p) => ({ p, ry: PI / 2, o: 'P', w: 0.78, h: 1.04, cap: true })),
+      pantry: [[-44.96, 2.2, -20.55], [-44.96, 2.2, -19.35], [-44.96, 2.2, -18.15]].map((p) => ({ p, ry: PI / 2, o: 'P', w: 0.9, h: 1.2, cap: true })),
       board: [{ p: [-44.86, 1.98, -13.78], ry: PI / 2, o: 'P', w: 0.56, h: 1.2, cap: false, depth: 0.02 }],
       summit: [
-        { p: [44.96, 2.85, -32.75], ry: -PI / 2, o: 'P', w: 1.15, h: 1.55, cap: true },
-        { p: [44.96, 2.2, -19.25], ry: -PI / 2, o: 'P', w: 1.1, h: 1.5, cap: true },
-        { p: [44.96, 2.05, -14.75], ry: -PI / 2, o: 'L', w: 1.8, h: 1.2, cap: true },
-        { p: [23.9, 2.2, -8.04], ry: PI, o: 'L', w: 1.6, h: 1.1, cap: true },
+        { p: [44.96, 2.95, -32.75], ry: -PI / 2, o: 'P', w: 1.4, h: 1.9, cap: true },
+        { p: [44.96, 2.35, -19.25], ry: -PI / 2, o: 'P', w: 1.3, h: 1.75, cap: true },
+        { p: [44.96, 2.2, -14.75], ry: -PI / 2, o: 'L', w: 2.2, h: 1.45, cap: true },
+        { p: [23.9, 2.2, -8.04], ry: PI, o: 'L', w: 1.65, h: 1.1, cap: true },
       ],
       office: [{ p: [-11.36, 2.05, -29.6], ry: PI / 2, o: 'L', w: 1.55, h: 1.05, cap: true }],
-      wall: [W(28.55, 2.35, 'L', 1.75, 1.2), W(32.65, 2.35, 'L', 1.75, 1.2), W(30.6, 2.5, 'P', 1.15, 1.75), W(30.6, 4.75, 'P', 0.95, 1.2), W(28.55, 4.45, 'L', 1.4, 0.95), W(32.65, 4.45, 'L', 1.4, 0.95)],
+      wall: [W(28.3, 2.5, 'L', 2.2, 1.45), W(32.9, 2.5, 'L', 2.2, 1.45), W(30.6, 2.5, 'P', 1.35, 2.0), W(30.6, 4.75, 'P', 1.0, 1.35), W(28.3, 4.55, 'L', 1.6, 1.05), W(32.9, 4.55, 'L', 1.6, 1.05)],
       corridor: [
         { p: [-22, 1.95, 2.04], ry: 0, o: 'L', w: 1.3, h: 0.9, cap: true }, { p: [21, 1.95, 2.04], ry: 0, o: 'L', w: 1.3, h: 0.9, cap: true },
         { p: [-15, 1.95, 5.96], ry: PI, o: 'L', w: 1.3, h: 0.9, cap: true }, { p: [17.4, 1.95, 5.96], ry: PI, o: 'L', w: 1.3, h: 0.9, cap: true },
@@ -1203,7 +1204,7 @@ export function buildZyoinMap(scene, { quality } = {}) {
         for (const ph of queue[g]) {
           const want = ph.aspect >= 1.1 ? 'L' : 'P';
           let i = free.findIndex((s) => s.o === want); if (i < 0) i = free.findIndex(() => true);
-          if (i < 0) { if (gi + 1 < order.length) queue[order[g === 'wall' ? gi + 1 : order.indexOf('wall') > gi ? order.indexOf('wall') : gi + 1]].push(ph); continue; }
+          if (i < 0) { const next = gi < order.indexOf('wall') ? 'wall' : order[gi + 1]; if (next) queue[next].push(ph); continue; }
           const s = free.splice(i, 1)[0];
           let w = s.w, h = s.h; if (ph.aspect > w / h) h = w / ph.aspect; else w = h * ph.aspect;
           const f = photoFrame(ph.src, { w, h, caption: s.cap ? ph.caption : '', frame: g === 'board' ? 0xf4f1ea : 0x1a2530, depth: s.depth || 0.06 });
@@ -1241,7 +1242,8 @@ export function buildZyoinMap(scene, { quality } = {}) {
   };
   const spawnPoint = new THREE.Vector3(0, 0, 31);
 
-  return { meshes, dyn, nodes, edges, posts, spawnPoint, M };
+  built = true;
+  return { meshes, dyn, nodes, edges, posts, spawnPoint, M, preview: { pos: [7.8, 2.7, 26.9], look: [-3.5, 2.9, 33.2] } };
 }
 
 // Stylised animated fountain water: concentric ripples from the jet, drifting caustic bands,
