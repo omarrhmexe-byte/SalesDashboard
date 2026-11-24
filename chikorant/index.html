@@ -84,7 +84,7 @@
 </div>
 
 <div id="select" class="scr select" hidden>
-  <div class="selTop"><span class="selMode">COMPETITIVE · ZYOIN HQ</span><span class="selTitle">CHOOSE YOUR AGENT</span><span class="selTimer" id="selTimer">80</span></div>
+  <div class="selTop"><span class="selMode">COMPETITIVE · CUSTOM GAME</span><span class="selTitle">CHOOSE YOUR AGENT</span><span class="selTimer" id="selTimer">80</span></div>
   <div class="selBody">
     <div class="selLeft">
       <div class="kicker">AGENT 01 <i></i> CONTROLLER</div>
@@ -106,11 +106,26 @@
   <div class="lockring"></div>
 </div>
 
+<div id="mapsel" class="scr mapsel" hidden>
+  <div class="msTop">
+    <span class="msMode">COMPETITIVE · CUSTOM GAME</span>
+    <span class="msTitle">CHOOSE THE MAP</span>
+    <span class="msAgent"><img src="m/chikero.jpg" alt="" />CHIKERO <b>LOCKED</b></span>
+  </div>
+  <div class="msCards" id="msCards"></div>
+  <div class="msBottom">
+    <div class="msPick"><span>SELECTED MAP</span><b id="msPickName">—</b></div>
+    <button class="lockin msGo" id="msGo" disabled>CONFIRM</button>
+    <div class="msHint">CLICK A MAP, THEN CONFIRM</div>
+  </div>
+  <div class="msFlash"></div>
+</div>
+
 <div id="intro" class="scr intro" hidden>
   <div class="introInner">
     <div class="sub">MAP</div>
-    <div class="mapname">ZYOIN HQ</div>
-    <div class="mapsub">BANGALORE · MEDITERRANEAN COURTYARD CAMPUS</div>
+    <div class="mapname" id="introMap">ZYOIN HQ</div>
+    <div class="mapsub" id="introSub">THE OFFICE. PANTRY RAIDS, SUMMIT SEASON, BEIGE WALLS SHE REFUSED TO BE.</div>
     <div class="side">ATTACKING</div>
   </div>
 </div>

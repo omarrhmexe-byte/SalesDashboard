@@ -1,7 +1,7 @@
 // Core game: renderer, world, player controller, weapon, abilities, bots, round flow.
 import * as THREE from 'three';
-import { buildMap } from './map.js';
-import { solids, moveBody, raycast, rayCylinder, raySphere, lineOfSight } from './physics.js';
+import { buildZyoinMap, DEFAULT_MAP, getMapBuilder, normalizeMap } from './maps/index.js';
+import { solids, moveBody, raycast, rayCylinder, raySphere, lineOfSight, swapSolids } from './physics.js';
 import { Particles, Tracers, Decals, Confetti, Fireworks } from './fx.js';
 import { Bot, Nav, Projectiles } from './bots.js';
 import { ViewModel, damp2, FIRE_RATE, RECOIL_MAX, recoilKick, recoilSway, weaponSpread } from './weapon.js';
@@ -48,8 +48,10 @@ export class Game {
     this.camera.rotation.order = 'YXZ';
     this.buildSky();
     this.buildLights();
-    this.map = buildMap(scene, { quality: this.quality });
-    this.nav = new Nav(this.map.nodes, this.map.edges);
+    // remember the default (golden-hour) environment so each map can tweak it and the next restore it
+    this.envBase = { fog: scene.fog ? { color: scene.fog.color.getHex(), near: scene.fog.near, far: scene.fog.far } : null, exposure: r.toneMappingExposure, lights: scene.children.filter((o) => o.isLight && o.intensity > 0).map((l) => [l, l.intensity]) };
+    this.mapRoot = null; this.mapId = null; this.mapShots = new Map();
+    this.installMap(DEFAULT_MAP, buildZyoinMap);
     this.vm = new ViewModel();
     this.post = new Post(r, scene, this.camera, this.vm);
     this.ps = new Particles(scene); this.tracers = new Tracers(scene); this.decals = new Decals(scene);
@@ -166,6 +168,107 @@ export class Game {
     this.post.setSize(w, h, this.pixelRatio || 1);
     this.ps.mat.uniforms.uScale.value = (h * (this.pixelRatio || 1)) / (2 * Math.tan((this.camera.fov * PI) / 360));
     const portrait = this.mobile && h > w; UI.show('rotate', portrait);
+  }
+
+  // ── maps ─────────────────────────────────────────────────────────────────
+  // Builds map `id` into its own group and swaps it in, disposing the previous map (geometry,
+  // materials, textures, collision). Sky, lights, cake, plant label, fx pools and the viewmodel
+  // are kept. If the build throws or breaks the contract, the current map stays and this throws.
+  installMap(id, build) {
+    const root = new THREE.Group(); root.name = `map:${id}`;
+    const prevSolids = swapSolids([]);
+    let map = null, err = null;
+    try {
+      map = build(root, { quality: this.quality });
+      const bad = normalizeMap(map, id); if (bad.length) err = new Error(`map "${id}" breaks the map contract: ${bad.join(', ')}`);
+    } catch (e) { err = e; }
+    if (err) { disposeObject(root); swapSolids(prevSolids); throw err; }
+    if (this.mapRoot) { this.scene.remove(this.mapRoot); disposeObject(this.mapRoot); }
+    this.scene.add(root);
+    this.mapRoot = root; this.mapId = id; this.map = map; this.barrierAnim = 0;
+    this.nav = new Nav(map.nodes, map.edges);
+    this.applyMapEnv(map, root);
+    if (this.plantLabel) this.plantLabel.position.set(map.dyn.plantCenter.x, 4.2, map.dyn.plantCenter.z);
+    if (this.mm) this.buildMinimap();
+    return map;
+  }
+  // Switches to map `id` before a match (no-op when it's already loaded, unless `force`).
+  // Falls back to ZYOIN HQ if the map can't be loaded or built. Resolves to the loaded id.
+  async loadMap(id, { force = false } = {}) {
+    let build = this.brokenMaps?.has(id) ? null : await getMapBuilder(id);
+    if (!build) { id = DEFAULT_MAP; build = buildZyoinMap; }
+    if (id === this.mapId && !force) return id;
+    this.clearWorld();
+    try { this.installMap(id, build); } catch (e) {
+      console.error(`[maps] ${id} failed to build, falling back to ${DEFAULT_MAP}`, e);
+      (this.brokenMaps ||= new Set()).add(id);
+      if (id === DEFAULT_MAP) throw e;
+      if (this.mapId !== DEFAULT_MAP) this.installMap(DEFAULT_MAP, buildZyoinMap);
+      id = DEFAULT_MAP;
+    }
+    this.renderer.compile(this.scene, this.camera); // warm the new map's shaders before round 1
+    this.hudCache = {};
+    return id;
+  }
+  // True if a map can be offered on the map-select screen.
+  async mapAvailable(id) { return !this.brokenMaps?.has(id) && !!(await getMapBuilder(id)); }
+  // Per-map environment (fog, exposure, sky, light levels); defaults to the golden-hour setup.
+  applyMapEnv(map, root) {
+    const e = map.env || {}, b = this.envBase, s = this.scene;
+    const fog = e.fog !== undefined ? e.fog : root.fog ? { color: root.fog.color.getHex(), near: root.fog.near, far: root.fog.far } : b.fog;
+    if (fog) { if (!s.fog) s.fog = new THREE.Fog(); s.fog.color.set(fog.color); s.fog.near = fog.near; s.fog.far = fog.far; } else s.fog = null;
+    s.background = e.background !== undefined ? e.background : (root.background || null);
+    this.renderer.toneMappingExposure = e.exposure ?? b.exposure;
+    if (this.sky) this.sky.visible = e.sky !== false;
+    let dir = 0;
+    for (const [l, base] of b.lights) {
+      const k = l.isHemisphereLight ? e.hemi : l === this.sun ? e.sun : l.isDirectionalLight ? (dir++ === 0 ? e.fill : e.rim) : 1;
+      l.intensity = base * (k ?? 1);
+    }
+  }
+  // Renders the loaded map from its preview pose into a JPEG data URL (map-select cards).
+  snapshotMap(w = 640, h = 400) {
+    const cam = this.camera, pose = this.map.preview || { pos: [0, 9.5, 24], look: [0, 2, -14] };
+    const savedP = cam.position.clone(), savedQ = cam.quaternion.clone(), savedState = this.state;
+    this.state = 'menu'; // no viewmodel in the shot
+    cam.position.set(...pose.pos); cam.lookAt(_v.set(...pose.look));
+    this.render(0);
+    const src = this.renderer.domElement, c = document.createElement('canvas'); c.width = w; c.height = h;
+    let cw = src.width, ch = src.width * h / w; if (ch > src.height) { ch = src.height; cw = ch * w / h; }
+    c.getContext('2d').drawImage(src, (src.width - cw) / 2, (src.height - ch) / 2, cw, ch, 0, 0, w, h);
+    cam.position.copy(savedP); cam.quaternion.copy(savedQ); this.state = savedState;
+    this.render(0); // put the live view back before the browser presents this frame
+    try { return c.toDataURL('image/jpeg', 0.84); } catch (e) { return null; }
+  }
+  // Snapshot for any map. A map that isn't loaded is built off to the side (desktop only), shot
+  // and thrown away again; the live map, its collision and its environment are untouched.
+  async previewMap(id) {
+    if (this.mapShots.has(id)) return this.mapShots.get(id);
+    if (id === this.mapId) { const u = this.snapshotMap(); if (u) this.mapShots.set(id, u); return u; }
+    if (this.mobile || this.state !== 'menu') return null;
+    const build = await getMapBuilder(id);
+    if (!build || this.state !== 'menu') return null;
+    if (id === this.mapId) return this.previewMap(id);
+    const root = new THREE.Group(), live = this.mapRoot, liveMap = this.map, prevSolids = swapSolids([]);
+    let url = null;
+    try {
+      const m = build(root, { quality: this.quality });
+      if (!normalizeMap(m, id).length) { live.visible = false; this.scene.add(root); this.applyMapEnv(m, root); this.map = m; url = this.snapshotMap(); }
+    } catch (e) { console.warn(`[maps] preview of ${id} failed`, e); (this.brokenMaps ||= new Set()).add(id); }
+    finally { this.scene.remove(root); disposeObject(root); live.visible = true; this.map = liveMap; this.applyMapEnv(liveMap, live); swapSolids(prevSolids); }
+    if (url) this.mapShots.set(id, url);
+    return url;
+  }
+  // PLAY AGAIN from the ending: reset the match and hand over to the map-select screen.
+  playAgain() {
+    this.score = { me: 0, them: 0 }; this.carryUlt = 0; this.paused = false; this.timeScale = 1; this.slowT = 0;
+    this.clearWorld();
+    this.cake.visible = false; this.plantLabel.visible = false; this.cakeLight.intensity = 0;
+    const d = this.map.dyn; d.plantRing.visible = false; d.plantBeacon.visible = false;
+    this.input.unlock(); this.input.enabled = false;
+    UI.show('hud', false); UI.show('touch', false);
+    this.state = 'menu';
+    if (this.onPlayAgain) this.onPlayAgain(); else { UI.show('hud'); if (this.mobile) UI.show('touch'); this.input.enabled = true; this.input.lock(); this.startRound(0); }
   }
 
   bindUI() {
@@ -805,7 +908,7 @@ export class Game {
     this.state = 'end'; this.input.unlock(); this.input.enabled = false; this.bannerShown = false;
     UI.show('card', false); UI.show('pause', false); UI.stopNote();
     UI.show('hud', false); UI.show('touch', false); UI.hideBanner();
-    const again = () => { this.score = { me: 0, them: 0 }; this.carryUlt = 0; UI.show('hud'); if (this.mobile) UI.show('touch'); this.input.enabled = true; this.input.lock(); this.startRound(0); };
+    const again = () => this.playAgain(); // resets the match and returns to map select
     // the post-game film plays first; the GG screen comes after it (and can replay it)
     const toEnding = () => UI.showEnding(again, () => { UI.show('ending', false); film(); });
     const film = () => import('./slideshow.js').then(({ playSlideshow }) => {
@@ -905,9 +1008,9 @@ export class Game {
     }
     x.fillStyle = 'rgba(236,232,225,0.25)';
     for (const s of solids) { if (s.max[1] >= 1.6 || s.tag === 'barrier') continue; x.fillRect(ox + s.min[0] * S, oz + s.min[2] * S, (s.max[0] - s.min[0]) * S, (s.max[2] - s.min[2]) * S); }
-    x.font = '28px "Bebas Neue", Impact, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.fillStyle = 'rgba(255,70,85,0.85)'; x.fillText('A', ox - 27 * S, oz - 27 * S); x.fillText('B', ox + 30 * S, oz - 21 * S);
-    x.fillStyle = 'rgba(236,232,225,0.4)'; x.font = '18px "Bebas Neue", Impact, sans-serif'; x.fillText('MID', ox, oz + 10 * S);
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    const labels = this.map.labels || [{ text: 'A', x: -27, z: -27 }, { text: 'B', x: 30, z: -21 }, { text: 'MID', x: 0, z: 10, size: 18, color: 'rgba(236,232,225,0.4)' }];
+    for (const l of labels) { x.font = `${l.size || 28}px "Bebas Neue", Impact, sans-serif`; x.fillStyle = l.color || 'rgba(255,70,85,0.85)'; x.fillText(l.text, ox + l.x * S, oz + l.z * S); }
   }
   drawMinimap() {
     const { S, ox, oz, cv, base } = this.mm; const x = cv.getContext('2d');
@@ -928,6 +1031,23 @@ export class Game {
   }
 }
 
+// Frees every GPU resource under `root` (geometries, materials, their textures, instanced
+// buffers) and empties it. Sprites share one global geometry, so theirs is left alone.
+function disposeObject(root) {
+  const geos = new Set(), mats = new Set(), texs = new Set();
+  root.traverse((o) => {
+    if (o.geometry && !o.isSprite) geos.add(o.geometry);
+    if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => mats.add(m));
+    if (o.isInstancedMesh) o.dispose();
+  });
+  for (const m of mats) {
+    for (const k of Object.keys(m)) { const v = m[k]; if (v && v.isTexture) texs.add(v); }
+    if (m.uniforms) for (const u of Object.values(m.uniforms)) { const v = u && u.value; if (v && v.isTexture) texs.add(v); else if (Array.isArray(v)) v.forEach((t) => t && t.isTexture && texs.add(t)); }
+    m.dispose();
+  }
+  geos.forEach((g) => g.dispose()); texs.forEach((t) => t.dispose());
+  root.clear();
+}
 function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function loadSettings(mobile) {
   const d = { volume: 0.8, sens: 1, quality: null };

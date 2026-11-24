@@ -33,7 +33,7 @@ Phone (landscape): left stick to move, drag on the right half to aim, plus FIRE 
 ## URL flags
 
 - `?q=low` or `?q=high` forces a quality level. Phones default to low: no shadows, no bloom, lower pixel ratio.
-- `?debug` exposes `window.G` for testing. `?skip` jumps straight into round 1.
+- `?debug` exposes `window.G` for testing. `?skip` jumps straight into round 1 (add `&map=garba` to pick the map).
 
 ## Deploy (Vercel)
 
@@ -63,7 +63,9 @@ The game is served at the root URL, so the printed QR code can point straight at
 |------|--------------|
 | `src/config.js` | Voice notes, rounds, bot names, ending text |
 | `src/game.js` | Renderer, player controller, weapon, abilities, round flow, HUD |
-| `src/map.js` | The ZYOIN HQ map: geometry, props, signs, cat, nav graph |
+| `src/maps/index.js` | Map registry + the map interface contract (read this before adding a map) |
+| `src/maps/zyoin.js` | The ZYOIN HQ office map: reception, photo wall, pantry, open office, Summit Hall, nav graph |
+| `src/mapselect.css` | Map-select screen (shown after LOCK IN) |
 | `src/physics.js` | Capsule-vs-AABB collision and ray queries |
 | `src/bots.js` | Deadline Bots: model, AI, projectiles, waypoint navigation |
 | `src/weapon.js` | "The Aux Cord" viewmodel |
