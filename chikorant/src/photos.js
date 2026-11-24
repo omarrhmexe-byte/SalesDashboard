@@ -52,7 +52,7 @@ export function photoFrame(url, { w = 1.2, h = 1.5, frame = 0x1a2530, caption = 
   const photo = new THREE.Mesh(new THREE.PlaneGeometry(w, h), pm); photo.position.z = depth / 2 + 0.002; g.add(photo);
   loadPhoto(url, (tex, aspect) => { const t = coverFit(tex, aspect, w, h); pm.map = t; if (glow) pm.emissiveMap = t; pm.needsUpdate = true; }, caption);
   if (caption) {
-    const cm = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.2), new THREE.MeshStandardMaterial({ map: captionTexture(caption), roughness: 0.8, emissive: 0xffffff, emissiveIntensity: glow * 0.5 }));
+    const cm = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.2), (() => { const ct = captionTexture(caption); return new THREE.MeshStandardMaterial({ map: ct, roughness: 0.8, emissive: 0xffffff, emissiveMap: ct, emissiveIntensity: glow * 0.5 }); })());
     cm.position.set(0, -h / 2 - 0.15, depth / 2 + 0.002); g.add(cm);
   }
   g.userData.noOutline = true;

@@ -107,7 +107,7 @@ export class Game {
   }
   buildLights() {
     // cool sky / warm bounce so shadowed sides read blue-violet and lit sides glow amber
-    const hemi = new THREE.HemisphereLight(0x9cbbe6, 0xd49a6c, 1.05); this.scene.add(hemi);
+    const hemi = new THREE.HemisphereLight(0x9cbbe6, 0xd49a6c, 1.05); this.scene.add(hemi); this.hemi = hemi;
     const sun = new THREE.DirectionalLight(0xffc58c, 3.4);
     sun.position.copy(this.sunDir).multiplyScalar(120); sun.target.position.set(0, 0, 0);
     sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
@@ -115,9 +115,9 @@ export class Game {
     sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05; sun.shadow.radius = 4;
     this.scene.add(sun, sun.target); this.sun = sun;
     // soft lavender skylight from the opposite side keeps shade colourful instead of grey
-    const fill = new THREE.DirectionalLight(0xa9a6ff, 0.45); fill.position.set(60, 40, -45); this.scene.add(fill);
+    const fill = new THREE.DirectionalLight(0xa9a6ff, 0.45); fill.position.set(60, 40, -45); this.scene.add(fill); this.fill = fill;
     // warm bounce from the west (setting-sun glow off the walls)
-    const rim = new THREE.DirectionalLight(0xffa36b, 0.3); rim.position.set(-70, 10, -30); this.scene.add(rim);
+    const rim = new THREE.DirectionalLight(0xffa36b, 0.3); rim.position.set(-70, 10, -30); this.scene.add(rim); this.rim = rim;
     this.muzzleLight = new THREE.PointLight(0xffc27a, 0, 9, 2); this.scene.add(this.muzzleLight);
     this.cakeLight = new THREE.PointLight(0xffb24a, 0, 7, 2); this.scene.add(this.cakeLight);
   }
@@ -225,6 +225,26 @@ export class Game {
       const k = l.isHemisphereLight ? e.hemi : l === this.sun ? e.sun : l.isDirectionalLight ? (dir++ === 0 ? e.fill : e.rim) : 1;
       l.intensity = base * (k ?? 1);
     }
+    // light colours / sun direction: remember the golden-hour defaults once, restore them, then
+    // apply a map's full lighting override (dyn.lighting, e.g. GARBA NIGHT's moonlight) if present
+    b.cols ||= { sun: this.sun.color.getHex(), sunPos: this.sun.position.clone(), hemiSky: this.hemi.color.getHex(), hemiGround: this.hemi.groundColor.getHex(), fill: this.fill.color.getHex(), rim: this.rim.color.getHex() };
+    this.sun.color.set(b.cols.sun); this.sun.position.copy(b.cols.sunPos); this.hemi.color.set(b.cols.hemiSky); this.hemi.groundColor.set(b.cols.hemiGround); this.fill.color.set(b.cols.fill); this.rim.color.set(b.cols.rim);
+    const L = map.dyn && map.dyn.lighting;
+    if (L) {
+      if (L.sunColor !== undefined) this.sun.color.set(L.sunColor);
+      if (L.sunIntensity !== undefined) this.sun.intensity = L.sunIntensity;
+      if (L.sunDir) this.sun.position.set(...L.sunDir).normalize().multiplyScalar(120);
+      if (L.hemiSky !== undefined) this.hemi.color.set(L.hemiSky);
+      if (L.hemiGround !== undefined) this.hemi.groundColor.set(L.hemiGround);
+      if (L.hemiIntensity !== undefined) this.hemi.intensity = L.hemiIntensity;
+      if (L.fillColor !== undefined) this.fill.color.set(L.fillColor);
+      if (L.fillIntensity !== undefined) this.fill.intensity = L.fillIntensity;
+      if (L.rimColor !== undefined) this.rim.color.set(L.rimColor);
+      if (L.rimIntensity !== undefined) this.rim.intensity = L.rimIntensity;
+      if (L.fog) { if (!s.fog) s.fog = new THREE.Fog(); s.fog.color.set(L.fog[0]); s.fog.near = L.fog[1]; s.fog.far = L.fog[2]; }
+      if (L.exposure !== undefined) this.renderer.toneMappingExposure = L.exposure;
+      if (map.dyn.sky && this.sky) this.sky.visible = false; // the map brings its own sky dome
+    }
   }
   // Renders the loaded map from its preview pose into a JPEG data URL (map-select cards).
   snapshotMap(w = 640, h = 400) {
@@ -329,7 +349,7 @@ export class Game {
     this.vm.equip = 1; this.vm.reloadT = 0; this.vm.ultT = 0; // a restart mid-reload / mid-ult must not carry the gun animation over
     UI.$('rdlabel').textContent = R.final ? 'FINAL ROUND' : `ROUND ${i + 1}`;
     UI.banner(R.final ? 'FINAL ROUND' : `ROUND ${i + 1}`, R.title.toUpperCase(), R.final ? 'CARRY THE CAKE TO A SITE' : '', 'round', 2100);
-    UI.$('objective').textContent = R.final ? `BRING THE CAKE TO A SITE (THE PANTRY) · HOLD ${this.mobile ? 'PLANT' : 'F'} TO PLANT` : 'ELIMINATE ALL DEADLINES';
+    UI.$('objective').textContent = R.final ? `BRING THE CAKE TO A SITE (${this.siteAName()}) · HOLD ${this.mobile ? 'PLANT' : 'F'} TO PLANT` : 'ELIMINATE ALL DEADLINES';
     UI.show('cakechip', !!R.final); UI.show('tF', false);
     sfx.roundStart();
     this.hudCache = {};
@@ -846,6 +866,7 @@ export class Game {
   }
 
   // ── final round ──────────────────────────────────────────────────────────
+  siteAName() { return (this.map.dyn.minimap && this.map.dyn.minimap.aName) || 'THE PANTRY'; }
   inPlantZone() { const c = this.map.dyn.plantCenter; const p = this.player.pos; return Math.hypot(p.x - c.x, p.z - c.z) < this.map.dyn.plantRadius && p.y < 0.6; }
   plantCake() {
     const p = this.player; p.carrying = false; p.plantT = 0; this.cakePlanted = true; this.cakeT = FINAL_ROUND.defendSeconds;
@@ -854,7 +875,7 @@ export class Game {
     this.cake.position.set(p.pos.x + fwd.x * 0.9, p.pos.y, p.pos.z + fwd.z * 0.9); this.cake.visible = true;
     this.cakeLight.position.copy(this.cake.position).add(new THREE.Vector3(0, 1, 0));
     const d = this.map.dyn; d.plantBeacon.visible = false; this.plantLabel.visible = false;
-    sfx.planted(); UI.banner('CAKE PLANTED', 'DEFEND', `${FINAL_ROUND.defendSeconds} SECONDS · HOLD THE PANTRY`, 'round', 2200);
+    sfx.planted(); UI.banner('CAKE PLANTED', 'DEFEND', `${FINAL_ROUND.defendSeconds} SECONDS · HOLD ${this.siteAName()}`, 'round', 2200);
     UI.$('objective').textContent = 'DEFEND THE CAKE';
     this.beepT = 0;
     // queue the rush
@@ -1009,13 +1030,14 @@ export class Game {
     x.fillStyle = 'rgba(236,232,225,0.25)';
     for (const s of solids) { if (s.max[1] >= 1.6 || s.tag === 'barrier') continue; x.fillRect(ox + s.min[0] * S, oz + s.min[2] * S, (s.max[0] - s.min[0]) * S, (s.max[2] - s.min[2]) * S); }
     x.textAlign = 'center'; x.textBaseline = 'middle';
-    const labels = this.map.labels || [{ text: 'A', x: -27, z: -27 }, { text: 'B', x: 30, z: -21 }, { text: 'MID', x: 0, z: 10, size: 18, color: 'rgba(236,232,225,0.4)' }];
+    const mm = this.map.dyn.minimap;
+    const labels = this.map.labels || (mm ? [{ text: 'A', x: mm.a[0], z: mm.a[1] }, { text: 'B', x: mm.b[0], z: mm.b[1] }, { text: 'MID', x: mm.mid[0], z: mm.mid[1] + 6, size: 18, color: 'rgba(236,232,225,0.4)' }] : [{ text: 'A', x: -27, z: -27 }, { text: 'B', x: 30, z: -21 }, { text: 'MID', x: 0, z: 10, size: 18, color: 'rgba(236,232,225,0.4)' }]);
     for (const l of labels) { x.font = `${l.size || 28}px "Bebas Neue", Impact, sans-serif`; x.fillStyle = l.color || 'rgba(255,70,85,0.85)'; x.fillText(l.text, ox + l.x * S, oz + l.z * S); }
   }
   drawMinimap() {
     const { S, ox, oz, cv, base } = this.mm; const x = cv.getContext('2d');
     x.clearRect(0, 0, cv.width, cv.height); x.drawImage(base, 0, 0);
-    if (this.R && this.R.final && !this.cakePlanted) { x.strokeStyle = '#FFC21A'; x.lineWidth = 2; x.beginPath(); x.arc(ox - 27 * S, oz - 27 * S, 4.5 * S, 0, 7); x.stroke(); }
+    if (this.R && this.R.final && !this.cakePlanted) { x.strokeStyle = '#FFC21A'; x.lineWidth = 2; x.beginPath(); const pc = this.map.dyn.plantCenter; x.arc(ox + pc.x * S, oz + pc.z * S, this.map.dyn.plantRadius * S, 0, 7); x.stroke(); }
     if (this.cake.visible) { x.fillStyle = '#FFC21A'; x.beginPath(); x.arc(ox + this.cake.position.x * S, oz + this.cake.position.z * S, 5, 0, 7); x.fill(); }
     for (const b of this.bots) {
       if (!b.alive) continue;
