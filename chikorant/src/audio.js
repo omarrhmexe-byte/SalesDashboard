@@ -3,7 +3,7 @@
 // Graph:  sources -> sfxBus ---------\
 //                 -> revIn -> convolver -> revOut -> sfxBus (shared short stereo room tail)
 //         music/ambience -> musicBus -> comp -> master -> limiter -> destination
-let ctx = null, master, sfxBus, musicBus, comp, limiter, noiseBuf, revIn;
+let ctx = null, master, sfxBus, musicBus, comp, limiter, noiseBuf, revIn, impulseBuf;
 let volume = 0.8;
 let ambience = null, lobby = null;
 const listeners = [];
@@ -44,7 +44,8 @@ export function initAudio() {
   sfxBus.connect(comp); musicBus.connect(comp); comp.connect(master); master.connect(limiter); limiter.connect(ctx.destination);
 
   // shared reverb (impulse built once)
-  const conv = ctx.createConvolver(); conv.buffer = buildImpulse(ctx);
+  impulseBuf = buildImpulse(ctx);
+  const conv = ctx.createConvolver(); conv.buffer = impulseBuf;
   revIn = ctx.createGain(); revIn.gain.value = 1;
   const revOut = ctx.createGain(); revOut.gain.value = 0.55;
   revIn.connect(conv); conv.connect(revOut); revOut.connect(sfxBus);
@@ -53,6 +54,7 @@ export function initAudio() {
   noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  prerenderSfx();
   listeners.forEach((f) => f());
 }
 export function onAudioReady(f) { listeners.push(f); }
@@ -118,20 +120,85 @@ function tablaNa(t, g = 0.2, out = sfxBus) {
   tone(t, 0.05, { freq: 1560, gain: g * 0.3, dec: 0.04, out });
 }
 
+// ── pre-rendered one-shots ───────────────────────────────────────────────────
+// shot / botShot / step fire many times a second, so their synthesis graphs are rendered once into
+// AudioBuffers (OfflineAudioContext, same voices as the live path, variation baked in) and played back
+// with a single AudioBufferSourceNode. Until the buffers are ready the live synthesis is used.
+function shotVoices(t, slow, out, tail) {
+  const p = rnd(0.94, 1.06) * (slow ? 0.78 : 1), lv = rnd(0.86, 1);
+  const pan = rnd(-0.06, 0.06);
+  noise(t, 0.05, { type: 'bandpass', freq: 3400 * p, q: 0.7, gain: 0.8 * lv, a: 0.0008, dec: 0.05, out, pan });           // crack
+  noise(t, 0.15, { type: 'lowpass', freq: 1500 * p, f2: 300, q: 0.7, gain: 0.9 * lv, a: 0.001, dec: 0.14, out, pan });     // body blast
+  tone(t, 0.14, { freq: 190 * p, f2: 48, gain: 1.0 * lv, a: 0.001, dec: 0.16, out, pan });                                  // thump
+  tone(t, 0.07, { type: 'triangle', freq: 430 * p, f2: 120, gain: 0.4 * lv, a: 0.001, dec: 0.07, out, pan });               // mid punch
+  noise(t + 0.01, 0.5, { type: 'lowpass', freq: 900, f2: 250, q: 0.3, gain: 0.3 * lv, a: 0.004, dec: 0.46, out: tail });    // stereo tail
+}
+const botGain = (dist) => Math.max(0.1, 0.6 - dist * 0.012);
+function botVoices(t, dist, out, tail, pan = rnd(-0.5, 0.5)) {
+  const g = botGain(dist);
+  tone(t, 0.25, { type: 'sawtooth', freq: 900, f2: 160, gain: g * 0.5, dec: 0.22, out, pan });
+  noise(t, 0.12, { type: 'bandpass', freq: Math.max(700, 1800 - dist * 40), q: 1.5, gain: g, dec: 0.1, out, pan });
+  noise(t, 0.35, { type: 'lowpass', freq: 800, gain: g * 0.4, dec: 0.3, out: tail });
+}
+function stepVoice(t, walk, out) {
+  noise(t, 0.06, { type: 'bandpass', freq: rnd(250, 420), q: 1.2, gain: walk ? 0.1 : 0.26, dec: 0.05, out, pan: rnd(-0.1, 0.1) });
+}
+
+const shotBank = [[], []], shotIdx = [0, 0];
+const stepBank = [[], []], stepIdx = [0, 0];
+const botBank = []; let botIdx = 0;
+let prerendering = false;
+
+// Render `build(t, dry, tail)` offline: dry goes straight to the output, tail through the shared impulse.
+async function renderOne(seconds, build) {
+  const sr = ctx.sampleRate;
+  const oc = new OfflineAudioContext(2, Math.ceil(sr * seconds), sr);
+  const conv = oc.createConvolver(); conv.buffer = impulseBuf;
+  const tail = oc.createGain(); const tailOut = oc.createGain(); tailOut.gain.value = 0.55;
+  tail.connect(conv); conv.connect(tailOut); tailOut.connect(oc.destination);
+  // the voice helpers build on the module `ctx`; point it at the offline context while the (synchronous) graph is built
+  const live = ctx; ctx = oc;
+  try { build(0, oc.destination, tail); } finally { ctx = live; }
+  return oc.startRendering();
+}
+async function prerenderSfx() {
+  if (prerendering || typeof OfflineAudioContext === 'undefined') return;
+  prerendering = true;
+  try {
+    for (let slow = 0; slow < 2; slow++) {
+      const set = [];
+      for (let i = 0; i < 6; i++) set.push(await renderOne(1.5, (t, d, tl) => shotVoices(t, !!slow, d, tl)));
+      shotBank[slow] = set;
+    }
+    for (let w = 0; w < 2; w++) {
+      const set = [];
+      for (let i = 0; i < 4; i++) set.push(await renderOne(0.12, (t, d) => stepVoice(t, !!w, d)));
+      stepBank[w] = set;
+    }
+    for (const dist of [4, 14, 26, 40]) {
+      const set = [];
+      for (const pan of [-0.4, 0.4, -0.15, 0.15]) set.push(await renderOne(1.3, (t, d, tl) => botVoices(t, dist, d, tl, pan * rnd(0.8, 1.25))));
+      botBank.push({ dist, set });
+    }
+  } catch (e) { console.warn("prerender", e); }
+}
+function playBuf(buf, t, rate = 1, gain = 1) {
+  const s = ctx.createBufferSource(); s.buffer = buf; s.playbackRate.value = rate;
+  if (gain !== 1) { const g = ctx.createGain(); g.gain.value = gain; s.connect(g); g.connect(sfxBus); } else s.connect(sfxBus);
+  s.start(t);
+}
+
 const PENTA = [0, 2, 4, 7, 9]; // major pentatonic (Bhoopali)
 const KILL_RATIOS = [1, 9 / 8, 5 / 4, 3 / 2, 5 / 3, 2];
 
 export const sfx = {
   // The Aux Cord: layered crack + body + thump, with a reverb-only tail. Each shot varies in pitch/level/pan.
-  shot(slow = false) {
-    if (!ctx) return; const t = now();
-    const p = rnd(0.94, 1.06) * (slow ? 0.78 : 1), lv = rnd(0.86, 1);
-    const pan = rnd(-0.06, 0.06);
-    noise(t, 0.05, { type: 'bandpass', freq: 3400 * p, q: 0.7, gain: 0.8 * lv, a: 0.0008, dec: 0.05, pan });           // crack
-    noise(t, 0.15, { type: 'lowpass', freq: 1500 * p, f2: 300, q: 0.7, gain: 0.9 * lv, a: 0.001, dec: 0.14, pan });     // body blast
-    tone(t, 0.14, { freq: 190 * p, f2: 48, gain: 1.0 * lv, a: 0.001, dec: 0.16, pan });                                  // thump
-    tone(t, 0.07, { type: 'triangle', freq: 430 * p, f2: 120, gain: 0.4 * lv, a: 0.001, dec: 0.07, pan });               // mid punch
-    noise(t + 0.01, 0.5, { type: 'lowpass', freq: 900, f2: 250, q: 0.3, gain: 0.3 * lv, a: 0.004, dec: 0.46, out: revIn });  // stereo tail
+  // `when` = seconds from now (default 0) so a caller can schedule the shot at its exact moment.
+  shot(slow = false, when = 0) {
+    if (!ctx) return;
+    const set = shotBank[slow ? 1 : 0];
+    if (set.length) { playBuf(set[shotIdx[slow ? 1 : 0]++ % set.length], now() + when, rnd(0.985, 1.015)); return; }
+    shotVoices(now() + when, slow, sfxBus, revIn);
   },
   dry() { if (!ctx) return; const t = now(); tone(t, 0.03, { type: 'square', freq: 1800, gain: 0.08, dec: 0.03 }); noise(t, 0.02, { type: 'highpass', freq: 4000, gain: 0.06, dec: 0.02 }); },
   reload() {
@@ -174,11 +241,16 @@ export const sfx = {
   },
   hurt() { if (!ctx) return; const t = now(); tone(t, 0.18, { freq: 110, f2: 55, gain: 0.5, dec: 0.16 }); noise(t, 0.12, { type: 'lowpass', freq: 700, gain: 0.3, dec: 0.1 }); },
   botShot(dist = 10) {
-    if (!ctx) return; const t = now(); const g = Math.max(0.1, 0.6 - dist * 0.012);
-    const pan = rnd(-0.5, 0.5);
-    tone(t, 0.25, { type: 'sawtooth', freq: 900, f2: 160, gain: g * 0.5, dec: 0.22, pan });
-    noise(t, 0.12, { type: 'bandpass', freq: Math.max(700, 1800 - dist * 40), q: 1.5, gain: g, dec: 0.1, pan });
-    noise(t, 0.35, { type: 'lowpass', freq: 800, gain: g * 0.4, dec: 0.3, out: revIn });
+    if (!ctx) return;
+    if (botBank.length) {
+      // nearest pre-rendered distance bucket, level corrected to the exact distance
+      let best = botBank[0];
+      for (const v of botBank) if (Math.abs(v.dist - dist) < Math.abs(best.dist - dist)) best = v;
+      const set = best.set;
+      playBuf(set[botIdx++ % set.length], now(), rnd(0.985, 1.015), botGain(dist) / botGain(best.dist));
+      return;
+    }
+    botVoices(now(), dist, sfxBus, revIn);
   },
   whiz() { if (!ctx) return; const t = now(); noise(t, 0.18, { type: 'bandpass', freq: 3500, f2: 900, q: 7, gain: 0.5, a: 0.03, dec: 0.15, pan: rnd(-0.6, 0.6) }); },
   shieldBreak() {
@@ -224,7 +296,12 @@ export const sfx = {
   ultReady() { if (!ctx) return; const t = now(); [79, 84, 88, 91, 96].forEach((m, i) => bell(t + i * 0.06, mtof(m), 0.1, 0.7, sfxBus)); },
   jump() { if (!ctx) return; const t = now(); noise(t, 0.08, { type: 'lowpass', freq: 500, gain: 0.4, dec: 0.07 }); },
   land(h = 1) { if (!ctx) return; const t = now(); noise(t, 0.12, { type: 'lowpass', freq: 380, gain: Math.min(0.9, 0.3 * h), dec: 0.1 }); tone(t, 0.08, { freq: 80, f2: 45, gain: Math.min(0.6, 0.15 * h), dec: 0.07 }); },
-  step(walk) { if (!ctx) return; const t = now(); noise(t, 0.06, { type: 'bandpass', freq: rnd(250, 420), q: 1.2, gain: walk ? 0.1 : 0.26, dec: 0.05, pan: rnd(-0.1, 0.1) }); },
+  step(walk) {
+    if (!ctx) return;
+    const set = stepBank[walk ? 1 : 0];
+    if (set.length) { playBuf(set[stepIdx[walk ? 1 : 0]++ % set.length], now(), rnd(0.97, 1.03)); return; }
+    stepVoice(now(), walk, sfxBus);
+  },
   // countdown beeps: clean, short, slightly percussive
   beep(hi = false) {
     if (!ctx) return; const t = now(); const f = hi ? 1320 : 880;
