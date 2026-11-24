@@ -43,6 +43,29 @@ function ringTexture() {
 // damped spring (2 sub-steps so it stays stable at low frame rates)
 function spring(s, k, c, dt) { const h = dt / 2; for (let i = 0; i < 2; i++) { s.v += (-s.x * k - s.v * c) * h; s.x += s.v * h; } return s.x; }
 
+// Exact critically damped spring step toward `to` (no overshoot, stable at any dt). s = { x, v }.
+export function damp2(s, to, w, dt) {
+  const e = s.x - to, ex = Math.exp(-w * dt), j = s.v + w * e;
+  s.x = to + (e + j * dt) * ex; s.v = (s.v - w * j * dt) * ex; return s.x;
+}
+
+// ── gun handling (shared by the game's shoot / recoil / crosshair code) ──
+export const FIRE_RATE = 10;          // rounds per second, full auto
+export const RECOIL_MAX = 0.024;      // max vertical climb (rad, ~1.4 deg)
+// vertical kick added by shot i (0-based): near zero for the first shot, then a gentle climb
+export const recoilKick = (i) => Math.min(0.004, 0.001 + i * 0.001);
+// horizontal drift target for shot i: a slow, smooth left-right wander once the climb tops out
+export const recoilSway = (i) => (i < 6 ? 0 : Math.sin((i - 6) * 0.55) * 0.012 * Math.min(1, (i - 6) / 4));
+// bullet spread (cone radius, rad). Forgiving: the first 3 shots from a standstill are pin-point.
+export function weaponSpread(shotIdx, hSpeed, onGround, mobile) {
+  let s = Math.min(0.006, Math.max(0, shotIdx - 2) * 0.0008);
+  if (hSpeed > 3.6) s += 0.007; else if (hSpeed > 1.2) s += 0.002;
+  if (!onGround) s += 0.02;
+  return mobile ? s * 0.5 : s;
+}
+// muzzle-flash variants, cycled in order so consecutive shots differ but never look random
+const FLASH_ROT = [0, 0.9, 0.35, 1.3], FLASH_S = [0.24, 0.2, 0.26, 0.21], FLASH_LEN = 0.04;
+
 export class ViewModel {
   constructor() {
     this.scene = new THREE.Scene();
@@ -193,7 +216,7 @@ export class ViewModel {
     this.kick = 0; this.swayX = 0; this.swayY = 0; this.bobT = 0; this.reloadT = 0; this.reloadDur = 2.0; this.lower = 0; this.equip = 1; this.tilt = 0;
     this.sp = { z: { x: 0, v: 0 }, y: { x: 0, v: 0 }, rx: { x: 0, v: 0 }, ry: { x: 0, v: 0 }, rz: { x: 0, v: 0 } };
     this.boltT = 0; this.heat = 0; this.ultT = 0; this.ultK = 0; this.time = 0;
-    this._v = new THREE.Vector3(); this._q = new THREE.Quaternion();
+    this._v = new THREE.Vector3(); this._q = new THREE.Quaternion(); this.fxPool = []; this.shotN = 0;
   }
   resize(aspect) {
     this.camera.aspect = aspect; this.camera.updateProjectionMatrix();
@@ -201,24 +224,47 @@ export class ViewModel {
     this.smoke.mat.uniforms.uScale.value = s; this.glints.mat.uniforms.uScale.value = s;
   }
   fire(gold = false) {
-    const sp = this.sp, r = Math.random;
-    sp.z.v += 28 + r() * 6; sp.rx.v += 26 + r() * 10; sp.ry.v += (r() - 0.5) * 18; sp.rz.v += (r() - 0.5) * 30; sp.y.v += 4;
+    const sp = this.sp, n = this.shotN = (this.shotN || 0) + 1, v = n & 3, alt = n & 1 ? 1 : -1;
+    // the same punch every shot (a little left/right alternation so it doesn't feel robotic)
+    sp.z.v += 30; sp.rx.v += 30; sp.ry.v += alt * 5; sp.rz.v += alt * 9; sp.y.v += 4;
     this.boltT = 1; this.heat = Math.min(1, this.heat + 0.08);
-    this.flashT = 0.05; this.flashG.visible = true;
-    this.flash.material.rotation = r() * PI; const s = 0.16 + r() * 0.12; this.flash.scale.set(s, s, 1);
-    const fs = 0.75 + r() * 0.6; this.cards.forEach((m, i) => { m.rotation.z = (i / 3) * PI + r() * 0.5; m.scale.set(0.8 + r() * 0.5, fs, 1); });
-    const po = r() * PI * 2; this.petals.forEach((pv, i) => { pv.rotation.z = po + (i / 5) * PI * 2 + (r() - 0.5) * 0.5; const k = 0.55 + r() * 0.7; pv.scale.set(k, k * (0.8 + r() * 0.5), k); });
+    this.flashT = FLASH_LEN; this.flashG.visible = true; this.flashG.scale.setScalar(1);
+    this.flash.material.rotation = FLASH_ROT[v]; this.flash.scale.set(FLASH_S[v], FLASH_S[v], 1);
+    const fs = 0.85 + (v & 1) * 0.3; this.cards.forEach((m, i) => { m.rotation.z = (i / 3) * PI + v * 0.4; m.scale.set(1, fs, 1); });
+    const po = v * 0.63; this.petals.forEach((pv, i) => { pv.rotation.z = po + (i / 5) * PI * 2; const k = 0.8 + ((i + v) % 3) * 0.12; pv.scale.set(k, k, k); });
     const fc = gold ? [3.4, 2.6, 0.9] : [2.6, 1.9, 1.1]; this.flameMat.color.setRGB(fc[0], fc[1], fc[2]); this.flash.material.color.setRGB(gold ? 3.4 : 3, gold ? 2.8 : 2.4, gold ? 1.0 : 1.4);
     this.ringT = 1; this.ring.visible = true; this.ring.material.color.setRGB(gold ? 3 : 2.2, gold ? 2.3 : 1.9, gold ? 0.8 : 1.5);
-    for (const e of this.eq) e.h = 0.008 + r() * 0.022;
+    for (let i = 0; i < this.eq.length; i++) this.eq[i].h = 0.012 + ((i * 7 + n * 3) % 5) * 0.004;
     // casing
+    const r = Math.random;
     const c = this.casings[this.caseI++ % this.casings.length];
-    this.gun.updateMatrixWorld(true); c.m.position.set(0.04, 0.025, -0.02).applyMatrix4(this.gun.matrixWorld);
+    this.gun.updateWorldMatrix(true, false); c.m.position.set(0.04, 0.025, -0.02).applyMatrix4(this.gun.matrixWorld);
     c.v.set(0.9 + r() * 0.5, 0.9 + r() * 0.5, 0.2 + r() * 0.3); c.w.set(r() * 30, r() * 10, 20 + r() * 20); c.t = 0.7; c.m.visible = true; c.m.rotation.set(0, 0, PI / 2);
-    // muzzle sparks + a wisp of smoke
-    const m = this.muzzleLocal.clone().applyMatrix4(this.gun.matrixWorld);
-    for (let i = 0; i < 3; i++) this.fxL.push({ p: m.clone(), v: new THREE.Vector3((r() - 0.5) * 2.5, (r() - 0.3) * 2.5, -4 - r() * 4), t: 0.08 + r() * 0.06, L: 0.14, c: gold ? [6, 4.6, 1.2] : [6, 3.6, 1.2], w: 0.0025, g: 0, k: 'spark' });
-    if (r() < 0.6) this.smoke.emit(m.x, m.y, m.z, (r() - 0.5) * 0.1, 0.12 + r() * 0.08, -0.25 - r() * 0.2, 0.75, 0.72, 0.7, 0.03, 0.7 + r() * 0.4, -0.05, 1.2, 0.22);
+    // muzzle sparks (pooled) + a wisp of smoke every other shot
+    const m = this._v.copy(this.muzzleLocal).applyMatrix4(this.gun.matrixWorld);
+    for (let i = 0; i < 3; i++) {
+      const o = this.fxPool.pop() || { p: new THREE.Vector3(), v: new THREE.Vector3(), t: 0, L: 0.14, c: [0, 0, 0], w: 0.0025, g: 0, k: 'spark' };
+      o.p.copy(m); o.v.set((r() - 0.5) * 2.5, (r() - 0.3) * 2.5, -4 - r() * 4); o.t = 0.08 + r() * 0.06; o.L = 0.14; o.w = 0.0025; o.k = 'spark';
+      o.c[0] = 6; o.c[1] = gold ? 4.6 : 3.6; o.c[2] = 1.2; this.fxL.push(o);
+    }
+    if (n & 1) this.smoke.emit(m.x, m.y, m.z, (r() - 0.5) * 0.1, 0.12 + r() * 0.08, -0.25 - r() * 0.2, 0.75, 0.72, 0.7, 0.03, 0.7 + r() * 0.4, -0.05, 1.2, 0.22);
+  }
+  // Compile the shaders of everything that is hidden until the first shot (muzzle flash sprite, flame cards,
+  // ring, casings). Otherwise the first trigger pull stalls on a shader compile. Call once, outside combat.
+  prewarm(renderer) {
+    const hidden = [this.flashG, this.ring, ...this.casings.map((c) => c.m)].filter((o) => !o.visible);
+    hidden.forEach((o) => (o.visible = true));
+    // both shader variants: straight to the canvas (low quality) and into the post-processing target (high)
+    const prev = renderer.getRenderTarget(), rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
+    const async = renderer.compileAsync && renderer.extensions.has('KHR_parallel_shader_compile'); // compiles off the main thread
+    try {
+      for (const target of [null, rt]) {
+        renderer.setRenderTarget(target);
+        if (async) renderer.compileAsync(this.scene, this.camera).catch(() => {}); else renderer.compile(this.scene, this.camera);
+      }
+    } catch (e) { /* warm-up is best effort */ }
+    renderer.setRenderTarget(prev); rt.dispose();
+    hidden.forEach((o) => (o.visible = false));
   }
   startReload(d) { this.reloadT = d; this.reloadDur = d; }
   hurt() { const r = Math.random; this.sp.rz.v += (r() - 0.5) * 40; this.sp.ry.v += (r() - 0.5) * 20; this.sp.y.v -= 10; }
@@ -238,7 +284,7 @@ export class ViewModel {
   }
   ult(dur) { this.ultT = dur; }
   // muzzle position in camera space (for world tracers)
-  muzzleCam(out) { this.gun.updateMatrixWorld(true); return out.copy(this.muzzleLocal).applyMatrix4(this.gun.matrixWorld); }
+  muzzleCam(out) { this.gun.updateWorldMatrix(true, false); return out.copy(this.muzzleLocal).applyMatrix4(this.gun.matrixWorld); }
 
   update(dt, s) {
     // s: { moving, speed, onGround, lookDX, lookDY, lowered, tilt }
@@ -246,7 +292,9 @@ export class ViewModel {
     if (this.kick) { sp.y.v -= this.kick * 26; sp.rx.v -= this.kick * 18; this.kick = 0; } // landing dip (set by the game)
     const kz = spring(sp.z, 520, 30, dt), ky = spring(sp.y, 300, 22, dt), krx = spring(sp.rx, 380, 24, dt), kry = spring(sp.ry, 300, 22, dt), krz = spring(sp.rz, 260, 18, dt);
     // flash / ring
-    this.flashT -= dt; if (this.flashT <= 0) this.flashG.visible = false;
+    // flash: shown on the shot's frame, then fades; hidden once its fixed lifetime is used up (same frame count every shot)
+    if (this.flashT > 1e-4) { this.flashG.visible = true; this.flashG.scale.setScalar(0.55 + 0.45 * Math.min(1, this.flashT / FLASH_LEN)); this.flashT -= dt; }
+    else this.flashG.visible = false;
     if (this.ringT > 0) { this.ringT = Math.max(0, this.ringT - dt * 9); const k = 1 - this.ringT; this.ring.scale.setScalar(0.25 + k * 1.3); this.ring.material.opacity = this.ringT * 0.9; if (this.ringT <= 0) this.ring.visible = false; }
     this.boltT = Math.max(0, this.boltT - dt * 16); this.bolt.position.z = -0.02 + this.boltT * 0.03;
     this.heat = Math.max(0, this.heat - dt * 0.6);
@@ -298,7 +346,7 @@ export class ViewModel {
       this.dotMat.color.setRGB(5 + uk * 1, 0.6 + uk * 3.6, 0.8 - uk * 0.4);
       this.eqMat.color.setRGB(0.4 + uk * 4, 3 + uk * 0.6, 2.6 - uk * 2);
       if (uk > 0.3 && Math.random() < dt * 30) {
-        this.gun.updateMatrixWorld(true); const r = Math.random;
+        this.gun.updateWorldMatrix(true, false); const r = Math.random;
         const q = this._v.set((r() - 0.5) * 0.08, (r() - 0.3) * 0.12, -0.6 * r() + 0.15).applyMatrix4(this.gun.matrixWorld);
         this.glints.emit(q.x, q.y, q.z, (r() - 0.5) * 0.05, 0.05 + r() * 0.08, (r() - 0.5) * 0.05, 5, 3.8, 1.2, 0.006 + r() * 0.006, 0.6 + r() * 0.5, -0.02, 0.5);
       }
@@ -315,8 +363,10 @@ export class ViewModel {
     }
     // vm-space streak effects
     const fx = this.fx; fx.begin();
-    this.fxL = this.fxL.filter((o) => {
-      o.t -= dt; if (o.t <= 0) return false;
+    let keep = 0;
+    for (let i = 0; i < this.fxL.length; i++) {
+      const o = this.fxL[i];
+      o.t -= dt; if (o.t <= 0) { if (o.k === 'spark') this.fxPool.push(o); continue; }
       if (o.k === 'wind') { o.a += dt * 7; o.p.x = Math.cos(o.a) * o.rad; o.p.z = -0.55 + Math.sin(o.a) * o.rad * 0.5; }
       o.p.addScaledVector(o.v, dt);
       const L = o.k === 'line' ? Math.min(0.9, o.v.length() * 0.05) : o.k === 'wind' ? 0.12 : o.L;
@@ -325,8 +375,9 @@ export class ViewModel {
       if (o.k === 'wind') { bx2 = Math.cos(o.a - 0.35) * o.rad; bz2 = -0.55 + Math.sin(o.a - 0.35) * o.rad * 0.5; by2 = o.p.y + 0.04; }
       const al = Math.min(1, o.t * 6);
       fx.push(o.p.x, o.p.y, o.p.z, bx2, by2, bz2, o.c[0], o.c[1], o.c[2], al, o.w);
-      return true;
-    });
+      this.fxL[keep++] = o;
+    }
+    this.fxL.length = keep;
     fx.end();
     this.smoke.update(dt); this.glints.update(dt);
   }

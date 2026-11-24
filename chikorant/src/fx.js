@@ -134,6 +134,8 @@ export class Sparks {
   clear() { this.n = 0; this.st.begin(); this.st.end(); }
 }
 
+const PC_ATTRS = ['position', 'color', 'size', 'alpha'];
+
 // Round point sprites. Additive = glow; normal = soft dust/smoke puffs that grow as they fade.
 export class PointCloud {
   constructor(scene, { max = 3000, additive = true, grow = 0, uScale = null } = {}) {
@@ -193,7 +195,9 @@ export class PointCloud {
       i++;
     }
     this.geo.setDrawRange(0, this.n);
-    for (const a of ['position', 'color', 'size', 'alpha']) this.geo.attributes[a].needsUpdate = true;
+    // upload only the live range (the full buffers are up to 3000 particles), and nothing at all when idle
+    if (this.n || this.lastN) for (const a of PC_ATTRS) { const at = this.geo.attributes[a]; at.clearUpdateRanges(); at.addUpdateRange(0, Math.max(1, this.n) * at.itemSize); at.needsUpdate = true; }
+    this.lastN = this.n;
   }
   copy(from, to) {
     for (let c = 0; c < 3; c++) { this.pos[to * 3 + c] = this.pos[from * 3 + c]; this.vel[to * 3 + c] = this.vel[from * 3 + c]; this.col[to * 3 + c] = this.col[from * 3 + c]; }
@@ -231,17 +235,20 @@ export class Particles extends PointCloud {
 export class Tracers {
   constructor(scene) {
     this.st = new Streaks(scene, 96, { tail: 0.92 });
-    this.list = []; this._d = new THREE.Vector3();
+    this.list = []; this.pool = []; this._d = new THREE.Vector3();
   }
   fire(a, b, color = null, width = 0.022, life = 0.07) {
     const c = color ? (color.isColor ? [color.r, color.g, color.b] : color) : [6, 4.2, 1.6];
     const L = a.distanceTo(b); if (L < 0.05) return;
-    this.list.push({ a: a.clone(), b: b.clone(), L, t: 0, life, c, w: width, speed: 240 + L * 2, bolt: Math.min(4, 1.2 + L * 0.1) });
-    if (this.list.length > 40) this.list.shift();
+    if (this.list.length >= 40) this.pool.push(this.list.shift());
+    const o = this.pool.pop() || { a: new THREE.Vector3(), b: new THREE.Vector3() };
+    o.a.copy(a); o.b.copy(b); o.L = L; o.t = 0; o.life = life; o.c = c; o.w = width; o.speed = 240 + L * 2; o.bolt = Math.min(4, 1.2 + L * 0.1);
+    this.list.push(o);
   }
   update(dt) {
-    const st = this.st; st.begin(); const d = this._d;
-    this.list = this.list.filter((o) => {
+    const st = this.st; st.begin(); const d = this._d; let keep = 0;
+    for (let i = 0; i < this.list.length; i++) {
+      const o = this.list[i];
       o.t += dt; const tr = o.t * o.speed; const head = Math.min(o.L, tr); const tail = Math.max(0, Math.min(o.L, tr - o.bolt));
       d.subVectors(o.b, o.a).divideScalar(o.L);
       const beamA = Math.max(0, 1 - o.t / o.life);
@@ -249,8 +256,9 @@ export class Tracers {
       if (tail < o.L) {
         st.push(o.a.x + d.x * head, o.a.y + d.y * head, o.a.z + d.z * head, o.a.x + d.x * tail, o.a.y + d.y * tail, o.a.z + d.z * tail, o.c[0], o.c[1], o.c[2], 1, o.w);
       }
-      return tail < o.L || beamA > 0;
-    });
+      if (tail < o.L || beamA > 0) this.list[keep++] = o; else this.pool.push(o);
+    }
+    this.list.length = keep;
     st.end();
   }
 }
@@ -266,7 +274,7 @@ export class Decals {
     const m = this.pool[this.i++ % this.pool.length];
     this._n.set(n[0], n[1], n[2]);
     m.position.copy(p).addScaledVector(this._n, 0.01);
-    m.lookAt(m.position.clone().add(this._n)); m.rotateZ(Math.random() * 6.28);
+    m.lookAt(this._n.add(m.position)); m.rotateZ(Math.random() * 6.28);
     const s = 0.8 + Math.random() * 0.5; m.scale.set(s, s, 1); m.visible = true;
   }
   clear() { this.pool.forEach((m) => (m.visible = false)); }
@@ -298,8 +306,11 @@ export class Confetti {
       keep.push(o);
     }
     this.p = keep;
-    this.p.forEach((o, i) => { this.q.setFromEuler(this.e.set(o.rx, o.ry, 0)); this.m.compose(new THREE.Vector3(o.x, o.y, o.z), this.q, this.s); this.mesh.setMatrixAt(i, this.m); this.mesh.setColorAt(i, o.c); });
-    this.mesh.count = this.p.length; this.mesh.instanceMatrix.needsUpdate = true; if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
+    const v = this._v || (this._v = new THREE.Vector3());
+    this.p.forEach((o, i) => { this.q.setFromEuler(this.e.set(o.rx, o.ry, 0)); this.m.compose(v.set(o.x, o.y, o.z), this.q, this.s); this.mesh.setMatrixAt(i, this.m); this.mesh.setColorAt(i, o.c); });
+    this.mesh.count = this.p.length;
+    if (!this.p.length) return; // nothing to upload (the buffers hold 900 instances; they used to be re-sent every frame)
+    for (const at of [this.mesh.instanceMatrix, this.mesh.instanceColor]) { if (!at) continue; at.clearUpdateRanges(); at.addUpdateRange(0, this.p.length * at.itemSize); at.needsUpdate = true; }
   }
   clear() { this.p = []; this.mesh.count = 0; }
 }
