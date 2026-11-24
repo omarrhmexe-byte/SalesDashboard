@@ -14,12 +14,27 @@ export class Input {
     });
     addEventListener('keyup', (e) => this.keys.delete(e.code));
     addEventListener('blur', () => { this.keys.clear(); this.fire = false; });
-    document.addEventListener('mousemove', (e) => { if (this.locked) { this.dx += e.movementX || 0; this.dy += e.movementY || 0; } });
-    document.addEventListener('mousedown', (e) => { if (this.locked && e.button === 0) this.fire = true; });
+    // Mouse look. Chrome's pointer lock (without raw input) sometimes reports a single huge
+    // movementX/Y jump, and the first event after locking can carry the cursor's warp; both
+    // would snap the view. Drop isolated outliers that are far bigger than the recent motion.
+    this.rawInput = false; this.moveAvg = 0; this.lockT = 0; this.spikes = 0; this.dropped = false;
+    document.addEventListener('mousemove', (e) => {
+      if (!this.locked) return;
+      const mx = e.movementX || 0, my = e.movementY || 0, m = Math.abs(mx) + Math.abs(my);
+      if (performance.now() - this.lockT < 60 && m > 40) { this.spikes++; return; } // warp right after locking
+      // a spike is one isolated event: never drop two in a row, so a genuine fast flick loses at most one sample
+      if (!this.dropped && m > (this.rawInput ? 1500 : 220) && m > this.moveAvg * 8 + 60) { this.spikes++; this.dropped = true; return; }
+      this.dropped = false; this.moveAvg += (m - this.moveAvg) * 0.3;
+      this.dx += mx; this.dy += my;
+    });
+    // fireTap latches a click that goes down and up between two frames, so a quick tap never gets lost
+    this.fireTap = false;
+    document.addEventListener('mousedown', (e) => { if (this.locked && e.button === 0) { this.fire = true; this.fireTap = true; } });
     document.addEventListener('mouseup', (e) => { if (e.button === 0) this.fire = false; });
     document.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
       const was = this.locked; this.locked = document.pointerLockElement === canvas;
+      if (this.locked && !was) { this.lockT = performance.now(); this.moveAvg = 0; }
       if (was && !this.locked) { this.fire = false; this.keys.clear(); if (this.onUnlock) this.onUnlock(); }
     });
     if (isMobile) this.setupTouch();
@@ -27,14 +42,15 @@ export class Input {
   lock() {
     if (this.mobile) return Promise.resolve();
     try {
+      // raw (unaccelerated) input when the browser supports it: 1 mouse count = the same turn everywhere
       const p = this.canvas.requestPointerLock({ unadjustedMovement: true });
-      if (p && p.catch) return p.catch(() => { try { return this.canvas.requestPointerLock(); } catch (e) { return null; } });
+      if (p && p.then) return p.then(() => { this.rawInput = true; }, () => { this.rawInput = false; try { return this.canvas.requestPointerLock(); } catch (e) { return null; } });
     } catch (e) { try { this.canvas.requestPointerLock(); } catch (e2) { /* */ } }
     return Promise.resolve();
   }
   unlock() { if (document.pointerLockElement) document.exitPointerLock(); }
   consume(code) { if (this.pressed.has(code)) { this.pressed.delete(code); return true; } return false; }
-  frameEnd() { this.pressed.clear(); this.dx = 0; this.dy = 0; }
+  frameEnd() { this.pressed.clear(); this.dx = 0; this.dy = 0; this.fireTap = false; }
 
   setupTouch() {
     const stick = document.getElementById('stick'), knob = document.getElementById('knob');

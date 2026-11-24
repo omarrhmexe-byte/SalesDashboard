@@ -4,7 +4,7 @@ import { buildMap } from './map.js';
 import { solids, moveBody, raycast, rayCylinder, raySphere, lineOfSight } from './physics.js';
 import { Particles, Tracers, Decals, Confetti, Fireworks } from './fx.js';
 import { Bot, Nav, Projectiles } from './bots.js';
-import { ViewModel } from './weapon.js';
+import { ViewModel, damp2, FIRE_RATE, RECOIL_MAX, recoilKick, recoilSway, weaponSpread } from './weapon.js';
 import { Post } from './post.js';
 import { Input } from './input.js';
 import { sfx, startAmbience, stopAmbience, setVolume, getVolume } from './audio.js';
@@ -15,7 +15,7 @@ import { outlineMaterial, addOutlines } from './builder.js';
 
 const PI = Math.PI;
 const RUN = 6.4, WALK = 3.2, JUMP_V = 6.9, GRAV = 22, EYE = 1.62, RADIUS = 0.38, HEIGHT = 1.8;
-const MAG = 25, FIRE_DT = 0.095, RELOAD = 1.9, DMG_BODY = 30, HS_MULT = 2.5;
+const MAG = 25, FIRE_DT = 1 / FIRE_RATE, RELOAD = 1.9, DMG_BODY = 30, HS_MULT = 2.5;
 const DASH_CD = 3, UP_CD = 6, ULT_COST = 5, ULT_TIME = 7;
 const ROUND_TIME = 120, PLANT_PHASE_TIME = 120;
 
@@ -415,15 +415,34 @@ export class Game {
     const cat = this.map.dyn.catHit;
     if (!p.catRescued && p.pos.y > 3.0 && Math.hypot(p.pos.x - cat.x, p.pos.z - cat.z) < 1.6) this.rescueCat();
 
-    // weapon
-    p.fireCd -= dt;
+    // weapon: fixed-rate full auto. fireCd is a time accumulator (it carries the remainder from frame to
+    // frame instead of restarting each shot), so the cadence is exactly FIRE_DT at any frame rate.
     if (p.reloadT > 0) { p.reloadT -= dt; if (p.reloadT <= 0) { p.ammo = MAG; } }
     if (inp.consume('KeyR') && p.ammo < MAG && p.reloadT <= 0 && !planting) this.reload();
     const canShoot = this.state !== 'buy' && !planting && p.reloadT <= 0;
-    if (inp.firing && canShoot && p.fireCd <= 0) {
-      if (p.ammo > 0) this.shoot(); else { if (p.fireCd <= 0) { sfx.dry(); p.fireCd = 0.25; } this.reload(); }
+    if ((inp.firing || inp.fireTap) && canShoot) {
+      for (let n = 0; p.fireCd <= 1e-4 && n < 3; n++) { // 1e-4: float dust must not slip a shot to the next frame
+        if (p.ammo > 0) { this.shoot(); p.fireCd += FIRE_DT; }
+        else { sfx.dry(); this.reload(); p.fireCd = 0; break; }
+      }
+      p.fireCd = Math.max(p.fireCd - dt, -FIRE_DT); // time until the next shot is due (never bank a burst after a hitch)
+    } else p.fireCd = Math.max(0, p.fireCd - dt);
+    if (p.ammo === 0 && p.reloadT <= 0 && this.t - p.lastShot > 0.15 && !planting) this.reload(); // auto-reload on empty
+
+    // recoil. Each shot raises a target; the aim offset (recoilP/Y: used by the bullets AND the camera) follows
+    // it on a critically damped spring, so the view glides up and back down instead of snapping. A separate
+    // visual-only punch gives each shot its kick. Recovery eases back once the trigger is released.
+    let rc = p.rc;
+    if (!rc || rc.p.x !== p.recoilP || rc.y.x !== p.recoilY) { // first use, or recoil was reset elsewhere (new round)
+      rc = p.rc = { tp: p.recoilP, ty: p.recoilY, p: { x: p.recoilP, v: 0 }, y: { x: p.recoilY, v: 0 }, punch: { x: 0, v: 0 } };
     }
-    if (this.t - p.lastShot > 0.14) { p.shotIdx = Math.max(0, p.shotIdx - dt * 30); const k = Math.min(1, dt * 7); p.recoilP -= p.recoilP * k; p.recoilY -= p.recoilY * k; }
+    if (this.t - p.lastShot > FIRE_DT + 0.05) { // trigger released (the margin covers a 20 fps frame)
+      const k = 1 - Math.exp(-dt * 6);
+      rc.tp -= rc.tp * k; rc.ty -= rc.ty * k;
+      p.shotIdx = Math.max(0, p.shotIdx - dt * 20);
+    }
+    p.recoilP = damp2(rc.p, rc.tp, 30, dt); p.recoilY = damp2(rc.y, rc.ty, 24, dt);
+    damp2(rc.punch, 0, 30, dt);
 
     // planting
     if (this.R.final && p.carrying) {
@@ -447,7 +466,7 @@ export class Game {
 
   aimAssist(dt) {
     const p = this.player; const cam = this.camera; let best = null, bestA = 0.14;
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+    const fwd = _v2.set(0, 0, -1).applyQuaternion(cam.quaternion);
     for (const b of this.bots) {
       if (!b.alive || !b.canSee) continue;
       const tgt = _v.set(b.pos.x, b.pos.y + 1.25, b.pos.z).sub(cam.position); const d = tgt.length(); tgt.divideScalar(d);
@@ -463,13 +482,26 @@ export class Game {
 
   updateCamera(dt) {
     const p = this.player; const cam = this.camera;
+    if (!this.vmWarm) { this.vmWarm = true; this.vm.prewarm(this.renderer); } // first in-round frame (buy phase), not the first shot
     p.camY += (EYE - p.camY) * Math.min(1, dt * 14);
     const stepDiff = p.pos.y + EYE - (this.lastCamY ?? p.pos.y + EYE);
     if (p.onGround && stepDiff > 0 && stepDiff < 0.6) p.camY -= stepDiff * 0.8; // smooth step-ups
     this.lastCamY = p.pos.y + EYE;
     if (p.alive) {
       cam.position.set(p.pos.x, p.pos.y + p.camY, p.pos.z);
-      cam.rotation.set(p.pitch + p.recoilP, p.yaw + p.recoilY, 0);
+      cam.rotation.set(p.pitch + p.recoilP + (p.rc ? p.rc.punch.x : 0), p.yaw + p.recoilY, 0);
+    }
+    // crosshair: the arms open with the current spread plus a short pulse per shot, then ease back
+    // (set as a transform only when the rounded gap changes; no class toggles or timers per shot)
+    if (!this.xArms) { const el = UI.$('cross'); this.xArms = el ? [el.querySelector('.l'), el.querySelector('.r'), el.querySelector('.t'), el.querySelector('.b')] : []; this.xGap = 0; this.xGapPx = 0; }
+    const pxPerRad = (innerHeight / 2) / Math.tan((cam.fov * PI) / 360);
+    const since = this.t - p.lastShot, pulse = Math.max(0, 1 - since / FIRE_DT);
+    const gapT = Math.min(10, weaponSpread(p.shotIdx, Math.hypot(p.vel.x, p.vel.z), p.onGround, this.mobile) * pxPerRad * 0.8) + (since < FIRE_DT + 0.05 ? 3 : 0) + pulse * 1.5;
+    this.xGap += (gapT - this.xGap) * (1 - Math.exp(-dt * 22));
+    const gpx = Math.round(this.xGap);
+    if (gpx !== this.xGapPx && this.xArms.length === 4) {
+      this.xGapPx = gpx; const [l, r, t, b] = this.xArms;
+      l.style.transform = `translateX(${-gpx}px)`; r.style.transform = `translateX(${gpx}px)`; t.style.transform = `translateY(${-gpx}px)`; b.style.transform = `translateY(${gpx}px)`;
     }
     const targetFov = (this.mobile ? 78 : 72) + (p.dashT > 0 ? 10 : 0) + (p.ultT > 0 ? -4 : 0);
     if (Math.abs(cam.fov - targetFov) > 0.05) { cam.fov += (targetFov - cam.fov) * Math.min(1, dt * 10); cam.updateProjectionMatrix(); }
@@ -492,23 +524,29 @@ export class Game {
 
   // ── combat ───────────────────────────────────────────────────────────────
   shoot() {
-    const p = this.player; const cam = this.camera;
-    p.ammo--; p.fireCd = FIRE_DT; p.lastShot = this.t;
+    const p = this.player;
+    const S = this._shot || (this._shot = { dir: new THREE.Vector3(), o: new THREE.Vector3(), end: new THREE.Vector3(), back: new THREE.Vector3(), refl: new THREE.Vector3(), m: new THREE.Vector3(), e: new THREE.Euler(0, 0, 0, 'YXZ'), q: new THREE.Quaternion() });
+    p.ammo--; p.lastShot = this.t;
     const i = p.shotIdx; const ult = p.ultT > 0;
-    // recoil: first shots accurate, then climb, then horizontal sway
-    const kp = i < 2 ? 0.002 : Math.min(0.012, 0.004 + i * 0.0012);
-    p.recoilP = Math.min(0.11, p.recoilP + kp);
-    if (i > 6) p.recoilY += Math.sin(i * 0.9) * 0.006;
-    p.shotIdx = Math.min(30, i + 1);
-    cam.rotation.set(p.pitch + p.recoilP, p.yaw + p.recoilY, 0); cam.updateMatrixWorld();
-    // spread: tiny when still, more when running/in air (forgiving)
+    // the bullet goes exactly where the crosshair points right now (aim + current recoil offset, before this
+    // shot's kick); spread is a uniform cone that is zero for the first shots from a standstill
     const hs = Math.hypot(p.vel.x, p.vel.z);
-    let spread = 0.0015 + (i > 3 ? 0.004 : 0);
-    if (hs > 3.6) spread += 0.012; if (!p.onGround) spread += 0.03;
-    if (this.mobile) spread *= 0.5;
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-    dir.x += (Math.random() - 0.5) * spread * 2; dir.y += (Math.random() - 0.5) * spread * 2; dir.z += (Math.random() - 0.5) * spread * 2; dir.normalize();
-    const o = cam.position;
+    const spread = weaponSpread(i, hs, p.onGround, this.mobile);
+    const yaw = p.yaw + p.recoilY, pitch = p.pitch + p.recoilP;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const dir = S.dir.set(-sy * cp, sp, -cy * cp);
+    if (spread > 0) {
+      const r = spread * Math.sqrt(Math.random()), a = Math.random() * PI * 2, rx = Math.cos(a) * r, ry = Math.sin(a) * r;
+      dir.x += cy * rx + sy * sp * ry; dir.y += cp * ry; dir.z += -sy * rx + cy * sp * ry; dir.normalize(); // right = (cy,0,-sy), up = (sy*sp, cp, cy*sp)
+    }
+    // recoil kick for the following shots: a gentle climb that tops out, then a slow sideways wander
+    const rc = p.rc;
+    if (rc) {
+      rc.tp = Math.min(RECOIL_MAX, rc.tp + recoilKick(i)); rc.ty = recoilSway(i + 1);
+      rc.punch.v += i < 1 ? 0.12 : 0.2; // view punch (visual only, never moves the bullets)
+    }
+    p.shotIdx = Math.min(30, i + 1);
+    const o = S.o.set(p.pos.x, p.pos.y + p.camY, p.pos.z);
     const wall = raycast(o.x, o.y, o.z, dir.x, dir.y, dir.z, 250);
     let maxT = wall ? wall.t : 250;
     // bots
@@ -525,8 +563,8 @@ export class Game {
     // the cat (never takes damage)
     const c = this.map.dyn.catHit;
     const tc = raySphere(o.x, o.y, o.z, dir.x, dir.y, dir.z, c.x, c.y, c.z, 0.5);
-    const end = o.clone().addScaledVector(dir, Math.min(hitT, maxT, tc > 0 ? tc : 1e9));
-    const back = _v2.copy(dir).negate();
+    const end = S.end.copy(o).addScaledVector(dir, Math.min(hitT, maxT, tc > 0 ? tc : 1e9));
+    const back = S.back.copy(dir).negate();
     if (tc > 0 && tc < hitT && tc < maxT) {
       UI.toast('NEVER. THE CAT IS SAFE.', 'NICE TRY', 1800); sfx.catSafe(); sfx.meow();
       this.ps.burst(end, 16, { speed: 3, color: [[5, 4, 1], [5, 1.5, 3]], size: 0.08, life: 0.6, grav: -1 });
@@ -550,20 +588,19 @@ export class Game {
       this.decals.add(end, wall.normal);
       const n = _v.set(wall.normal[0], wall.normal[1], wall.normal[2]);
       // ricochet sparks fan out around the reflected ray, dust puffs off the surface
-      const refl = dir.clone().addScaledVector(n, -2 * dir.dot(n)).add(n).normalize();
+      const refl = S.refl.copy(dir).addScaledVector(n, -2 * dir.dot(n)).add(n).normalize();
       this.ps.sparkBurst(end, 9, { speed: 7.5, color: ult ? [[6, 4.4, 1.2], [6, 5.4, 2.6]] : [[5, 3.4, 1.2], [5, 2.2, 0.7]], width: 0.011, life: 0.28, dir: refl, spread: 0.75, grav: 16 });
       this.ps.burst(end, 1, { speed: 0, color: [5, 3.4, 1.5], size: 0.3, life: 0.05, grav: 0 });
       this.ps.puff(end, 3, { dir: n, speed: 1.5, spread: 0.6, size: 0.26, life: 0.85, color: [0.78, 0.7, 0.6], alpha: 0.5 });
     }
-    // tracer + flash + light
-    const m = this.vm.muzzleCam(new THREE.Vector3());
-    m.multiplyScalar(1.6).applyQuaternion(cam.quaternion).add(cam.position);
+    // tracer (every shot, so the rhythm reads evenly) + flash + light. The tracer starts at the on-screen muzzle.
+    const m = this.vm.muzzleCam(S.m);
+    S.q.setFromEuler(S.e.set(p.pitch + p.recoilP + (rc ? rc.punch.x : 0), p.yaw + p.recoilY, 0));
+    m.multiplyScalar(1.6).applyQuaternion(S.q).add(o);
     if (ult) this.tracers.fire(m, end, [6, 4.6, 1.3], 0.03, 0.12);
-    else if (i % 3 !== 1) this.tracers.fire(m, end, [6, 4.2, 1.8], 0.018, 0.06);
+    else this.tracers.fire(m, end, [6, 4.2, 1.8], 0.015, 0.05);
     this.vm.fire(ult); sfx.shot(ult);
-    if (this.quality === 'high') { this.muzzleLight.position.copy(cam.position).addScaledVector(dir, 1.2); this.muzzleLight.intensity = 7; this.muzzleLight.color.set(ult ? 0xffd36a : 0xffc27a); }
-    UI.$('cross').classList.add('spread'); clearTimeout(this.crossT); this.crossT = setTimeout(() => UI.$('cross').classList.remove('spread'), 120);
-    if (p.ammo === 0) setTimeout(() => this.reload(), 150);
+    if (this.quality === 'high') { this.muzzleLight.position.copy(o).addScaledVector(dir, 1.2); this.muzzleLight.intensity = 7; this.muzzleLight.color.set(ult ? 0xffd36a : 0xffc27a); }
     // gunfire alerts nearby bots
     for (const b of this.bots) if (b.alive && !b.aware && b.pos.distanceTo(p.pos) < 22) { b.aware = true; b.react = 0.8; b.lastSeenPos.copy(p.pos); b.lostT = 2; }
   }
